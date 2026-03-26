@@ -37,6 +37,8 @@ import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
 import StudentGradesPage from "./pages/dashboard/StudentGradesPage";
 import StudentPracticePage from "./pages/dashboard/StudentPracticePage";
 import ParentDashboardPage from "./pages/dashboard/ParentDashboardPage";
+import StudentLiveLessonPage from "./pages/dashboard/StudentLiveLessonPage";
+import StudentRightsPage from "./pages/dashboard/StudentRightsPage";
 import SnakesLaddersGamePage from "./pages/dashboard/SnakesLaddersGamePage";
 import TeacherGradesPage from "./pages/dashboard/TeacherGradesPage";
 import TaskStudioPage from "./pages/dashboard/TaskStudioPage";
@@ -78,6 +80,8 @@ const App = () => (
             <Route path="ai-tutor" element={<AITutorPage />} />
             <Route path="grades" element={<StudentGradesPage />} />
             <Route path="practice/:assignmentId" element={<StudentPracticePage />} />
+            <Route path="live-student" element={<StudentLiveLessonPage />} />
+            <Route path="rights" element={<StudentRightsPage />} />
             <Route path="game/snakes/:assignmentId" element={<SnakesLaddersGamePage />} />
             <Route path="attendance" element={<PlaceholderPage title="נוכחות" description="דוח נוכחות והצדקת חיסורים" icon="📋" />} />
             {/* Teacher routes */}
