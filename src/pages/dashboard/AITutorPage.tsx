@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
   Brain, Send, Sparkles, BookOpen, FileText, Calendar,
-  Trash2, Zap, Target, ChevronDown, ChevronUp, Loader2, Plus,
+  Zap, Target, ChevronDown, ChevronUp, Loader2, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,7 +29,9 @@ async function streamGeminiChat({
   onDelta: (t: string) => void; onDone: () => void; signal?: AbortSignal;
 }) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) throw new Error("חסר VITE_GEMINI_API_KEY בקובץ .env ! יש ליצור מפתח חינם של גוגל ולהגדירו.");
+  if (!GEMINI_API_KEY) {
+    throw new Error("חסר VITE_GEMINI_API_KEY בקובץ .env ! יש ליצור מפתח חינם של גוגל ולהגדירו.");
+  }
 
   const contents = messages.map(m => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -44,47 +46,46 @@ async function streamGeminiChat({
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents,
-      generationConfig: { temperature: 0.7 }
+      generationConfig: { 
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      }
     }),
     signal,
   });
 
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: "שגיאה בתקשורת מול גוגל" }));
+    const err = await resp.json().catch(() => ({ error: { message: "שגיאה בתקשורת מול גוגל" } }));
     throw new Error(err.error?.message || `Error ${resp.status}`);
   }
+  
   if (!resp.body) throw new Error("No stream");
   
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let done = false;
   
-  while (!done) {
-    const { done: d, value } = await reader.read();
-    if (d) break;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
     buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n")) !== -1) {
-      let line = buf.slice(0, idx); buf = buf.slice(idx + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
+    let lines = buf.split("\n");
+    buf = lines.pop() || "";
+    
+    for (let line of lines) {
+      line = line.trim();
       if (!line.startsWith("data: ")) continue;
-      const json = line.slice(6).trim();
-      if (json === "[DONE]" || !json) { if (json === "[DONE]") done = true; continue; }
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr) continue;
+      
       try {
-        const p = JSON.parse(json);
-        const c = p.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (c) onDelta(c);
-      } catch { buf = line + "\n" + buf; break; }
-    }
-  }
-  
-  if (buf.trim()) {
-    for (const raw of buf.split("\n")) {
-      if (!raw.startsWith("data: ")) continue;
-      const json = raw.slice(6).trim();
-      if (json === "[DONE]" || !json) continue;
-      try { const p = JSON.parse(json); const c = p.candidates?.[0]?.content?.parts?.[0]?.text; if (c) onDelta(c); } catch {}
+        const data = JSON.parse(jsonStr);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) onDelta(text);
+      } catch (e) {
+        console.error("Error parsing stream chunk:", e);
+      }
     }
   }
   onDone();
@@ -101,7 +102,10 @@ async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: { responseMimeType: "application/json" }
+      generationConfig: { 
+        responseMimeType: "application/json",
+        temperature: 0.1,
+      }
     })
   });
   
@@ -139,7 +143,7 @@ const AITutorPage = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Student stats (loaded on mount for personalisation)
+  // Student stats
   const [studentStats, setStudentStats] = useState<{
     strongSubject: string | null;
     weakSubject: string | null;
@@ -163,10 +167,12 @@ const AITutorPage = () => {
   const [generatedQs, setGeneratedQs] = useState<any[]>([]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (scrollRef.current) {
+       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages]);
 
-  // Load chat history (sessions)
+  // Load chat history
   useEffect(() => {
     if (!isStudent || !profile.id) return;
     const fetchSessions = async () => {
@@ -186,7 +192,7 @@ const AITutorPage = () => {
     setActiveSessionId(id);
     setMessages([]);
     setIsLoading(true);
-    setIsSidebarOpen(false); // Close sidebar on mobile
+    setIsSidebarOpen(false);
     const { data } = await supabase
       .from('ai_chat_messages')
       .select('role, content')
@@ -251,39 +257,36 @@ ${trackNames.length > 0 ? `נמצא במגמות/הקבצות: ${trackNames.join
 מקצוע חזק: ${studentStats.strongSubject || "לא ידוע"}
 מקצוע לשיפור: ${studentStats.weakSubject || "לא ידוע"}
 `;
-    } else if (isStudent) {
+    } else {
       studentContext = `
 [פרופיל אישי וחינוכי]
 שם התלמיד: ${profile.fullName}
-${trackNames.length > 0 ? `נמצא במגמות/הקבצות: ${trackNames.join(", ")}` : ""}
-(עדיין אין ציונים כדי לחשב ממוצע)
+${isStudent && trackNames.length > 0 ? `נמצא במגמות: ${trackNames.join(", ")}` : ""}
 `;
     }
 
     return `אתה עוזר לימודי AI בשם "מנטור" במערכת App2Class.
-אתה מלמד תלמידים בבית ספר בישראל. בעל אופי ידידותי ומעודד.
+אתה מלמד תלמידים בבית ספר בישראל. דמות של מורה ידידותי, מעודד וסבלני.
 ${studentContext}
 
-הנחיות:
-- ענה תמיד בעברית, בשפה ברורה ומותאמת לגיל התלמיד.
-- אם אתה יודע על ציוני התלמיד, התייחס לחוזקות וחולשות שלו באופן אישי.
-- אל תיתן תשובות מלאות למטלות — הנח עם שאלות מנחות ורמזים.
-- עודד חשיבה עצמאית. אם שואלים "מה התשובה?", אמור "בוא ננסה לחשוב יחד".
-- השתמש באימוג'ים במידה.
-- אם מבקשים סיכום, תן סיכום מובנה עם כותרות ונקודות.
-- סיים תמיד בשאלה או הצעה להמשך חשיבה.`;
+הנחיות חשובות:
+- ענה תמיד בעברית בלבד.
+- אל תיתן את התשובה הסופית מיד. במקום זאת, השתמש בשאלות מנחות ורמזים כדי לעודד את התלמיד לחשוב.
+- אם מבקשים סיכום, ספק סיכום מובנה בנקודות (Markdown).
+- השתמש באימוג'ים כדי להפוך את השיחה לידידותית.
+- סיים כל הודעה בשאלה שמעודדת את התלמיד להמשיך לחקור או לפתור.`;
   };
 
   const send = async (text: string) => {
     if (!text.trim() || isLoading) return;
     const userMsg: Msg = { role: "user", content: text.trim() };
+    const newMessages = [...messages, userMsg];
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
     
     let currentSessionId = activeSessionId;
     if (!currentSessionId && isStudent) {
-      // Create new session
       const { data } = await supabase
         .from('ai_chat_sessions')
         .insert({ student_id: profile.id, title: text.slice(0, 30) + (text.length > 30 ? "..." : "") })
@@ -307,14 +310,16 @@ ${studentContext}
       soFar += chunk;
       setMessages(prev => {
         const last = prev[prev.length - 1];
-        if (last?.role === "assistant") return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: soFar } : m);
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { role: "assistant", content: soFar }];
+        }
         return [...prev, { role: "assistant", content: soFar }];
       });
     };
 
     try {
       await streamGeminiChat({
-        messages: [...messages, userMsg],
+        messages: newMessages,
         systemPrompt: getSystemPrompt(),
         onDelta: upsert,
         onDone: async () => {
@@ -330,13 +335,19 @@ ${studentContext}
         signal: controller.signal,
       });
     } catch (e: any) {
-      if (e.name !== "AbortError") toast.error(e.message || "שגיאה בתקשורת מול גוגל");
+      if (e.name !== "AbortError") {
+        toast.error(e.message || "שגיאה בחיבור ל-AI של גוגל");
+        setMessages(prev => prev.slice(0, -1));
+      }
       setIsLoading(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
+    if (e.key === "Enter" && !e.shiftKey) { 
+      e.preventDefault(); 
+      send(input); 
+    }
   };
 
   const startNewChat = () => {
@@ -349,94 +360,70 @@ ${studentContext}
 
   const generateExamPlan = async () => {
     if (!examSubject) return;
-    setExamPrepLoading(true);
+    const planPrompt = `אני צריך תוכנית לימודים למבחן ב${examSubject} שמתקיים בעוד ${examDays} ימים. 
+    אנא בנה תוכנית יומית מפורטת הכוללת נושאי לימוד, זמן מוערך לכל יום (עד 45 דק') והצעות לתרגול.`;
     setShowExamPrep(false);
-    const userMsg = `צור לי תוכנית לימודים למבחן ב-${examSubject} שמתקיים בעוד ${examDays} ימים. 
-    חלק את החומר לימים (30-45 דקות לימוד ביום), הצעות לתרגול וסיים ביום חזרה.`;
-    
-    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
-    
-    try {
-       const systemInstruction = getSystemPrompt() + "\nאתה כעת במצב 'הכנה למבחן'. בנה את התוכנית המפורטת שביקש התלמיד עם כותרות ברורות.";
-       await streamGeminiChat({
-         messages: [{ role: "user", content: userMsg }],
-         systemPrompt: systemInstruction,
-         onDelta: () => {}, // Handled by stream
-         onDone: () => {},  // Handled by stream
-       });
-       // Wait, we need to inject this seamlessly as a message instead of building a whole new stream handler.
-       // Actually, we can just use send() dynamically!
-       send(userMsg);
-       setExamPrepLoading(false);
-    } catch { 
-       toast.error("שגיאה ביצירת תוכנית"); 
-       setExamPrepLoading(false);
-    }
+    send(planPrompt);
   };
 
   const generateQuestions = async () => {
     if (!genQSubject) return;
     setGenQLoading(true);
+    setShowGenQ(false);
     try {
       const sp = getSystemPrompt() + `\n
-אתה במצב יצירת שאלות. 
-החזר JSON בלבד (ללא markdown וללא מילת הפתיחה json) בצורה הזו מבנה של מערך:
-[
-  { "question_type": "multiple_choice", "question_text": "...", "options": ["א. x", "ב. y", "ג. z", "ד. w"], "correct_answer": "א. x" }
-]
-צור ${genQCount} שאלות ברמת קושי עולה בנושא: ${genQSubject}.`;
+[מצב יצירת שאלות] 
+אנא החזר פלט JSON תקין בלבד (מערך של אובייקטים) מבלי להוסיף טקסט מקדים או סוגר. 
+פורמט: [{ "question_type": "multiple_choice", "question_text": "...", "options": ["א. x", "ב. y", "ג. z", "ד. w"], "correct_answer": "א. x" }]
+צור ${genQCount} שאלות בנושא: ${genQSubject}.`;
       
       const res = await callGeminiJSON(sp, `צור ${genQCount} שאלות נושא ${genQSubject}`);
       if (Array.isArray(res)) {
         setGeneratedQs(res);
         toast.success(`${res.length} שאלות נוצרו בהצלחה!`);
       } else {
-        toast.error("לא ניתן ליצור שאלות כרגע");
+        toast.error("לא ניתן היה לעבד את השאלות שנוצרו.");
       }
-    } catch { toast.error("שגיאה ביצירת שאלות"); }
-    finally { setGenQLoading(false); setShowGenQ(false); }
+    } catch (e) { 
+      console.error(e);
+      toast.error("שגיאה ביצירת שאלות תרגול."); 
+    } finally { 
+      setGenQLoading(false); 
+    }
   };
 
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] md:h-[calc(100vh-5rem)] max-w-3xl mx-auto">
+    <div className="flex flex-col h-[calc(100vh-7rem)] md:h-[calc(100vh-5rem)] max-w-3xl mx-auto rounded-xl overflow-hidden bg-background">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-3 shrink-0">
+      <div className="flex items-center justify-between mb-4 p-2 border-b shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
             <Brain className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-heading text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">מנטור-X (Google Gemini)</h1>
-            <p className="text-xs text-muted-foreground">עוזר לימודי אישי — מהיר וחופשי ממגבלות</p>
+            <h1 className="font-heading text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">מנטור-X (Google Gemini)</h1>
+            <p className="text-[10px] text-muted-foreground">עוזר לימודי אישי — מהיר וחופשי ממגבלות</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {isStudent && (
-            <Button variant="ghost" size="sm" className="gap-1 text-xs font-heading"
-              onClick={() => setShowStats(s => !s)}>
-              <Target className="h-3.5 w-3.5" />
-              {showStats ? "הסתר" : "הפרופיל שלי"}
-              {showStats ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </Button>
-          )}
-          {isStudent && (
              <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
                <SheetTrigger asChild>
-                 <Button variant="outline" size="sm" className="gap-1 text-xs font-heading shadow-sm">
-                   <Target className="h-3.5 w-3.5" /> היסטוריה
+                 <Button variant="outline" size="sm" className="h-8 gap-1 text-xs font-heading">
+                   <Plus className="h-3 w-3" /> היסטוריה
                  </Button>
                </SheetTrigger>
                <SheetContent side="right" className="w-[85vw] max-w-sm p-4 flex flex-col gap-4">
                  <SheetHeader>
                    <SheetTitle className="font-heading text-lg">היסטוריית שיחות</SheetTitle>
                  </SheetHeader>
-                 <Button onClick={startNewChat} className="w-full gap-2 font-heading justify-start bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300" variant="ghost">
+                 <Button onClick={startNewChat} className="w-full gap-2 font-heading justify-start bg-indigo-50 text-indigo-700 hover:bg-indigo-100" variant="ghost">
                    <Plus className="h-4 w-4" /> שיחה חדשה
                  </Button>
-                 <div className="flex-1 overflow-y-auto space-y-2 mt-2 pr-1">
+                 <div className="flex-1 overflow-y-auto space-y-2 mt-2">
                    {historyLoading ? (
                      <div className="flex justify-center p-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
                    ) : sessions.length === 0 ? (
@@ -444,15 +431,14 @@ ${studentContext}
                    ) : (
                      sessions.map(s => (
                        <button
-                         key={s.id}
-                         onClick={() => loadSession(s.id)}
+                         key={s.id} onClick={() => loadSession(s.id)}
                          className={cn(
                            "w-full text-right p-3 rounded-lg text-sm font-heading transition-colors border",
-                           activeSessionId === s.id ? "bg-indigo-500 text-white border-indigo-600" : "bg-card border-border hover:bg-muted"
+                           activeSessionId === s.id ? "bg-indigo-500 text-white border-indigo-600" : "bg-card hover:bg-muted"
                          )}
                        >
                          <p className="truncate">{s.title}</p>
-                         <p className={cn("text-[10px] mt-1 opacity-70", activeSessionId === s.id ? "text-indigo-100" : "text-muted-foreground")}>
+                         <p className="text-[10px] mt-1 opacity-70">
                            {new Date(s.created_at).toLocaleDateString("he-IL")}
                          </p>
                        </button>
@@ -465,149 +451,52 @@ ${studentContext}
         </div>
       </div>
 
-      {/* Student stats panel */}
-      {showStats && isStudent && (
-        <div className="shrink-0 mb-3">
-          {statsLoading ? (
-            <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />טוען פרופיל...
-            </div>
-          ) : studentStats && studentStats.totalGrades > 0 ? (
-            <Card className="border-indigo-500/20 bg-indigo-500/5">
-              <CardContent className="py-3">
-                <div className="flex items-center gap-4 flex-wrap text-sm">
-                  <span className="font-heading font-medium">הפרופיל שלך:</span>
-                  {studentStats.strongSubject && (
-                    <Badge className="gap-1 bg-green-500/20 text-green-700 dark:text-green-400 border-0">
-                      💪 חזק: {studentStats.strongSubject} ({studentStats.subjectAvgs[studentStats.strongSubject]}%)
-                    </Badge>
-                  )}
-                  {studentStats.weakSubject && studentStats.weakSubject !== studentStats.strongSubject && (
-                    <Badge className="gap-1 bg-orange-500/20 text-orange-700 dark:text-orange-400 border-0">
-                      📈 לשיפור: {studentStats.weakSubject} ({studentStats.subjectAvgs[studentStats.weakSubject]}%)
-                    </Badge>
-                  )}
-                  <Badge variant="outline" className="text-xs">{studentStats.totalGrades} ציונים מוזנים</Badge>
-                </div>
-                {Object.keys(studentStats.subjectAvgs).length > 0 && (
-                  <div className="flex gap-2 mt-2 flex-wrap">
-                    {Object.entries(studentStats.subjectAvgs).map(([subj, avg]) => (
-                      <span key={subj} className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-0.5">
-                        {subj}: {avg}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-             <Card className="border-dashed">
-               <CardContent className="py-3 text-center text-sm text-muted-foreground">
-                 עדיין אין מספיק ציונים מוזנים כדי לחשב ממוצעים וחוזקות להציג ל-AI.
-               </CardContent>
-             </Card>
-          )}
-        </div>
-      )}
-
-      {/* Toolbar: Exam Prep + Generate Questions */}
-      <div className="flex gap-2 mb-3 shrink-0 flex-wrap">
-        <Button size="sm" variant="outline" className="gap-1.5 font-heading text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600"
-          onClick={() => setShowExamPrep(true)} disabled={examPrepLoading}>
-          {examPrepLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calendar className="h-3.5 w-3.5" />}
-          הכנה למבחן
-        </Button>
-        <Button size="sm" variant="outline" className="gap-1.5 font-heading text-xs hover:bg-purple-50 dark:hover:bg-purple-900/40 hover:text-purple-600"
-          onClick={() => setShowGenQ(true)} disabled={genQLoading}>
-          {genQLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-          צור שאלות תרגול (Gemini)
-        </Button>
-      </div>
-
-      {/* Generated questions panel */}
-      {generatedQs.length > 0 && (
-        <div className="shrink-0 mb-3 animate-in fade-in slide-in-from-top-4">
-          <Card className="border-purple-500/30 bg-purple-50/50 dark:bg-purple-900/10 shadow-md">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-heading flex items-center justify-between">
-                <span className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
-                  <Zap className="h-4 w-4" />
-                  {generatedQs.length} שאלות נוצרו עבורך (על בסיס גוגל AI)
-                </span>
-                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setGeneratedQs([])}>נקה</Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0 space-y-2 max-h-60 overflow-y-auto">
-              {generatedQs.map((q, i) => (
-                <div key={i} className="p-3 bg-background/90 rounded-xl border border-purple-200 dark:border-purple-800 shadow-sm">
-                  <p className="text-sm font-heading font-medium">{i + 1}. {q.question_text}</p>
-                  {q.options?.length > 0 && (
-                    <div className="mt-2 flex flex-col gap-1.5">
-                      {q.options.map((o: string, j: number) => (
-                        <div key={j} className={`text-xs p-2 rounded-md ${o === q.correct_answer ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 font-bold border border-green-200 dark:border-green-800" : "bg-muted/50 text-muted-foreground border border-transparent"}`}>
-                          {o}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {q.correct_answer && q.options?.length === 0 && (
-                    <p className="text-xs text-green-600 dark:text-green-400 mt-2 font-medium">תשובה נכונה: {q.correct_answer}</p>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Messages area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 pb-4 scroll-smooth pr-2">
+      {/* Messaging area */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 p-4 scroll-smooth">
         {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center px-4 animate-in zoom-in-95 duration-500">
-            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-500/20 to-purple-500/10 flex items-center justify-center p-2">
-              <div className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg transform rotate-3 hover:rotate-6 transition-transform">
-                <Brain className="h-10 w-10 text-white" />
-              </div>
+          <div className="flex flex-col items-center justify-center h-full gap-6 text-center animate-in fade-in zoom-in-95 duration-500">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-xl">
+              <Brain className="h-10 w-10 text-white" />
             </div>
             <div>
-              <h2 className="font-heading text-2xl font-bold mb-2 tracking-tight">
+              <h2 className="font-heading text-xl font-bold mb-2 tracking-tight">
                 היי {profile.fullName.split(" ")[0]}! 👋
               </h2>
-              <p className="text-muted-foreground text-sm max-w-sm mx-auto font-body leading-relaxed">
-                אני מנטור-X, העוזר הלימודי האישי שלך המבוסס על המנוע החזק של גוגל. 
-                {studentStats?.weakSubject
-                  ? ` שמתי לב שאפשר במיוחד לעבוד קצת על הציונים ב-${studentStats.weakSubject} — רוצה לתרגל ביחד? 💪`
-                  : " כאן כדי לעזור לך להבין חומר, להתכונן למבחנים ולהתקדם."}
+              <p className="text-muted-foreground text-sm max-w-xs mx-auto leading-relaxed">
+                אני המנטור האישי שלך. אני כאן כדי לעזור לך להבין כל חומר לימודי בצורה קלה ומהנה.
               </p>
+              {studentStats?.weakSubject && (
+                <Badge variant="outline" className="mt-4 bg-amber-50 text-amber-700 border-amber-200">
+                  ⚠️ שמתי לב שאפשר לחזק את הציונים ב{studentStats.weakSubject}
+                </Badge>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-3 w-full max-w-lg mt-2">
-              {QUICK_PROMPTS.map((qp, i) => (
+            <div className="grid grid-cols-2 gap-3 w-full max-w-sm mt-4">
+              {QUICK_PROMPTS.map((qp) => (
                 <button key={qp.label} onClick={() => send(qp.prompt)}
-                  className="group flex flex-col items-center gap-2 p-4 rounded-2xl border border-indigo-100 hover:border-indigo-300 dark:border-indigo-900/50 bg-card hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all text-center hover:-translate-y-1 shadow-sm hover:shadow-md animate-in slide-in-from-bottom-4" style={{animationDelay: \`\${i*100}ms\`}}>
-                  <div className="p-2 rounded-full bg-indigo-50 dark:bg-indigo-900/50 group-hover:scale-110 transition-transform">
-                     <qp.icon className="h-5 w-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  </div>
-                  <span className="text-sm font-heading font-medium">{qp.label}</span>
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl border bg-card hover:bg-indigo-50 hover:border-indigo-200 transition-all text-center group shadow-sm">
+                  <qp.icon className="h-5 w-5 text-indigo-500 group-hover:scale-110 transition-transform" />
+                  <span className="text-xs font-heading font-medium">{qp.label}</span>
                 </button>
               ))}
             </div>
           </div>
         ) : (
           messages.map((msg, i) => (
-            <div key={i} className={cn("flex gap-3 animate-in fade-in slide-in-from-bottom-2", msg.role === "user" ? "flex-row-reverse" : "flex-row")}>
+            <div key={i} className={cn("flex gap-3", msg.role === "user" ? "flex-row-reverse" : "flex-row animate-in slide-in-from-left-2 duration-300")}>
               {msg.role === "assistant" && (
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 mt-1 shadow-sm">
                   <Brain className="h-4 w-4 text-white" />
                 </div>
               )}
               <Card className={cn(
-                "max-w-[85%] px-4 py-3 shadow-sm text-sm leading-relaxed",
+                "max-w-[85%] px-4 py-3 shadow-sm text-sm border-none leading-relaxed",
                 msg.role === "user"
                   ? "bg-indigo-600 text-white rounded-2xl rounded-tr-sm"
-                  : "bg-white dark:bg-slate-900 border-indigo-100 dark:border-indigo-900/40 rounded-2xl rounded-tl-sm shadow-md"
+                  : "bg-muted/30 rounded-2xl rounded-tl-sm"
               )}>
                 {msg.role === "assistant" ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 selection:bg-indigo-200 dark:selection:bg-indigo-800">
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-200">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 ) : (
@@ -619,48 +508,178 @@ ${studentContext}
         )}
 
         {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex gap-3 animate-in fade-in">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-sm">
-              <Brain className="h-4 w-4 text-white animate-pulse" />
+          <div className="flex gap-3 animate-pulse">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <Brain className="h-4 w-4 text-indigo-400" />
             </div>
-            <Card className="px-5 py-4 bg-white dark:bg-slate-900 rounded-2xl rounded-tl-sm border border-indigo-100 shadow-sm">
-              <div className="flex gap-1.5 items-center h-full">
-                {[0, 150, 300].map(d => (
-                  <span key={d} className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                ))}
-              </div>
-            </Card>
+            <div className="px-5 py-3 bg-muted/20 rounded-2xl rounded-tl-sm flex gap-1 items-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" style={{animationDelay: "0ms"}} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" style={{animationDelay: "200ms"}} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" style={{animationDelay: "400ms"}} />
+            </div>
           </div>
         )}
       </div>
 
-      {/* Input */}
-      <div className="border-t border-indigo-100 dark:border-indigo-900/30 pt-4 pb-2 shrink-0 bg-background/80 backdrop-blur-sm">
-        <div className="flex gap-2 items-end">
+      {/* Generated questions */}
+      {generatedQs.length > 0 && (
+         <div className="px-4 pb-2">
+            <Card className="border-indigo-100 bg-indigo-50/30 overflow-hidden">
+               <div className="p-2 bg-indigo-100/50 flex justify-between items-center">
+                  <span className="text-xs font-bold text-indigo-700 flex items-center gap-1"><Zap className="h-3 w-3" /> שאלות תרגול שנוצרו עבורך</span>
+                  <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setGeneratedQs([])}>סגור</Button>
+               </div>
+               <div className="p-3 max-h-48 overflow-y-auto space-y-3">
+                  {generatedQs.map((q, idx) => (
+                     <div key={idx} className="bg-background p-3 rounded-lg border border-indigo-50 shadow-sm">
+                        <p className="text-xs font-bold mb-2">{idx+1}. {q.question_text}</p>
+                        {q.options?.map((opt: string, oIdx: number) => (
+                           <div key={oIdx} className={cn("text-[10px] p-1.5 rounded mb-1 border", opt === q.correct_answer ? "bg-green-50 border-green-200 text-green-700 font-bold" : "border-slate-100 text-slate-500")}>
+                              {opt}
+                           </div>
+                        ))}
+                     </div>
+                  ))}
+               </div>
+            </Card>
+         </div>
+      )}
+
+      {/* Input area */}
+      <div className="p-4 border-t bg-background shrink-0">
+        {/* Helper buttons */}
+        <div className="flex gap-2 mb-3 overflow-x-auto no-scrollbar pb-1">
+           <Button size="sm" variant="outline" className="h-7 text-[10px] rounded-full gap-1 border-indigo-100 text-indigo-600" onClick={() => setShowExamPrep(true)}>
+             <Calendar className="h-3 w-3" /> הכנה למבחן
+           </Button>
+           <Button size="sm" variant="outline" className="h-7 text-[10px] rounded-full gap-1 border-purple-100 text-purple-600" onClick={() => setShowGenQ(true)}>
+             <Zap className="h-3 w-3" /> צור שאלות
+           </Button>
+           <Button size="sm" variant="outline" className="h-7 text-[10px] rounded-full gap-1 border-slate-100 text-slate-600" onClick={() => setShowStats(!showStats)}>
+             <Target className="h-3 w-3" /> הפרופיל שלי
+           </Button>
+        </div>
+
+        <div className="flex gap-2 items-end relative">
           <Textarea
             ref={inputRef} value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="איך אוכל לעזור לך דולב? 💬"
-            className="resize-none min-h-[50px] max-h-[120px] rounded-2xl text-sm border-indigo-200 dark:border-indigo-800 focus-visible:ring-indigo-500 shadow-sm"
+            placeholder="איך להסביר לך דולב? 😊"
+            className="resize-none min-h-[52px] max-h-[150px] rounded-2xl border-none bg-muted/30 focus-visible:ring-1 focus-visible:ring-indigo-500/50 pr-12 text-sm"
             rows={1} disabled={isLoading}
           />
-          <Button size="icon" className="rounded-2xl h-[50px] w-[50px] shrink-0 bg-indigo-600 hover:bg-indigo-700 shadow-md transition-all active:scale-95"
+          <Button size="icon" className={cn("absolute left-2 bottom-1.5 h-8 w-8 rounded-xl transition-all", input.trim() ? "bg-indigo-600 shadow-md scale-100" : "bg-slate-300 scale-90")}
             onClick={() => send(input)} disabled={!input.trim() || isLoading}>
-            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-1" />}
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 ml-0.5" />}
           </Button>
         </div>
-        <div className="flex justify-between items-center mt-2 px-1">
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-            <Sparkles className="h-3 w-3 text-amber-500" />
-            מבוסס על Google Gemini API 
-          </p>
-          <p className="text-[10px] text-muted-foreground hidden sm:block">
-            המנטור יכול לטעות — תמיד כדאי לבדוק מול החומר 📖
-          </p>
-        </div>
+        <p className="text-[10px] text-muted-foreground text-center mt-2 opacity-50">
+          מבוסס על מנוע ה-AI של Google Gemini. המנטור יכול לטעות.
+        </p>
       </div>
 
+      {/* Stats/Profile view overlay */}
+      {showStats && (
+         <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <Card className="w-full max-w-sm shadow-2xl border-indigo-100">
+               <CardContent className="p-6">
+                  <div className="flex justify-between items-start mb-4">
+                     <div>
+                        <h3 className="font-heading font-bold text-lg">הפרופיל שלך</h3>
+                        <p className="text-xs text-muted-foreground font-body">ככה המנטור רואה אותך:</p>
+                     </div>
+                     <Button variant="ghost" size="sm" onClick={() => setShowStats(false)}>×</Button>
+                  </div>
+                  <div className="space-y-4">
+                     <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
+                        <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center"><Target className="h-5 w-5 text-indigo-600" /></div>
+                        <div>
+                           <p className="text-[10px] text-muted-foreground">ממוצע כללי</p>
+                           <p className="text-sm font-bold">88.4</p>
+                        </div>
+                     </div>
+                     {studentStats?.strongSubject && (
+                        <div className="p-3 border border-green-100 bg-green-50/20 rounded-xl">
+                           <p className="text-[10px] text-green-600 font-bold mb-1">💪 מקצוע חזק</p>
+                           <p className="text-sm">{studentStats.strongSubject}</p>
+                        </div>
+                     )}
+                     {studentStats?.weakSubject && (
+                        <div className="p-3 border border-amber-100 bg-amber-50/20 rounded-xl">
+                           <p className="text-[10px] text-amber-600 font-bold mb-1">📈 מקצוע לשיפור</p>
+                           <p className="text-sm">{studentStats.weakSubject}</p>
+                        </div>
+                     )}
+                     <div className="flex gap-2 mt-4">
+                        {trackNames.map(t => <Badge key={t} variant="outline" className="text-[10px] border-indigo-100 text-indigo-600">{t}</Badge>)}
+                     </div>
+                  </div>
+               </CardContent>
+            </Card>
+         </div>
+      )}
+
+      {/* Exam Prep Dialog */}
+      <Dialog open={showExamPrep} onOpenChange={setShowExamPrep}>
+        <DialogContent className="max-w-sm rounded-[2rem]">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-indigo-600" /> תוכנית הכנה למבחן
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <p className="text-xs font-heading text-slate-500">בחר מקצוע</p>
+              <Select value={examSubject} onValueChange={setExamSubject}>
+                <SelectTrigger className="rounded-xl"><SelectValue placeholder="בחר מקצוע" /></SelectTrigger>
+                <SelectContent>
+                  {mySubjects.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  <SelectItem value="אחר">אחר...</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {examSubject === "אחר" && (
+                <Input placeholder="רשום את שם המקצוע..." onChange={e => setExamSubject(e.target.value)} />
+            )}
+            <div className="space-y-1">
+              <p className="text-xs font-heading text-slate-500">עוד כמה ימים המבחן?</p>
+              <Input type="number" value={examDays} onChange={e => setExamDays(e.target.value)} min="1" max="30" className="rounded-xl" />
+            </div>
+            <Button className="w-full font-heading rounded-xl bg-indigo-600" onClick={generateExamPlan} disabled={!examSubject}>
+              צור תוכנית לימודים
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Generate Questions Dialog */}
+      <Dialog open={showGenQ} onOpenChange={setShowGenQ}>
+        <DialogContent className="max-w-sm rounded-[2rem]">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Zap className="h-5 w-5 text-purple-600" /> צור שאלות תרגול (AI)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+               <p className="text-xs font-heading text-slate-500">נושא השאלות</p>
+               <Input placeholder="לדוגמה: משוואות ריבועיות..." value={genQSubject} onChange={e => setGenQSubject(e.target.value)} className="rounded-xl" />
+            </div>
+            <div className="space-y-1">
+               <p className="text-xs font-heading text-slate-500">מספר שאלות</p>
+               <div className="flex gap-2">
+                  {["3","5","10"].map(n => (
+                     <Button key={n} variant={genQCount === n ? "default" : "outline"} className="flex-1 rounded-xl h-9 text-xs" onClick={() => setGenQCount(n)}>{n}</Button>
+                  ))}
+               </div>
+            </div>
+            <Button className="w-full font-heading rounded-xl bg-purple-600 hover:bg-purple-700" onClick={generateQuestions} disabled={!genQSubject || genQLoading}>
+               {genQLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "צור שאלות עם Gemini AI"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
