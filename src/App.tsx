@@ -36,7 +36,8 @@ import TeacherAssignmentPage from "./pages/dashboard/TeacherAssignmentPage";
 import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
 import StudentGradesPage from "./pages/dashboard/StudentGradesPage";
 import StudentPracticePage from "./pages/dashboard/StudentPracticePage";
-import SnakesAndLaddersGame from "./pages/dashboard/SnakesAndLaddersGame";
+import ParentDashboardPage from "./pages/dashboard/ParentDashboardPage";
+import SnakesLaddersGamePage from "./pages/dashboard/SnakesLaddersGamePage";
 import TeacherGradesPage from "./pages/dashboard/TeacherGradesPage";
 import TaskStudioPage from "./pages/dashboard/TaskStudioPage";
 import NotFound from "./pages/NotFound";
@@ -60,7 +61,7 @@ const App = () => (
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="students" element={<PlaceholderPage title="תלמידים" description="ניהול תלמידים ומעקב אחר התקדמות" icon="🎓" />} />
             <Route path="classes" element={<PlaceholderPage title="כיתות" description="ניהול כיתות, מערכת שעות ושיוכים" icon="📚" />} />
-            <Route path="my-child" element={<PlaceholderPage title="הילד שלי" description="צפייה במידע ובהתקדמות הילד" icon="👨‍👧" />} />
+            <Route path="my-child" element={<ParentDashboardPage />} />
             <Route path="stats" element={<PlaceholderPage title="סטטיסטיקות" description="נתונים, גרפים ודוחות" icon="📊" />} />
             <Route path="admin" element={<PlaceholderPage title="ניהול מערכת" description="הגדרות מערכת ובתי ספר" icon="🛡️" />} />
             <Route path="org-tree" element={<SchoolOrgTreePage />} />
@@ -77,7 +78,7 @@ const App = () => (
             <Route path="ai-tutor" element={<AITutorPage />} />
             <Route path="grades" element={<StudentGradesPage />} />
             <Route path="practice/:assignmentId" element={<StudentPracticePage />} />
-            <Route path="game/snakes/:assignmentId" element={<SnakesAndLaddersGame />} />
+            <Route path="game/snakes/:assignmentId" element={<SnakesLaddersGamePage />} />
             <Route path="attendance" element={<PlaceholderPage title="נוכחות" description="דוח נוכחות והצדקת חיסורים" icon="📋" />} />
             {/* Teacher routes */}
             <Route path="teacher-home" element={<TeacherDashboard />} />

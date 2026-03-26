@@ -1,0 +1,2 @@
+ALTER TABLE public.student_tracks DROP CONSTRAINT student_tracks_track_type_check;
+ALTER TABLE public.student_tracks ADD CONSTRAINT student_tracks_track_type_check CHECK (track_type = ANY (ARRAY['megama'::text, 'megama_a'::text, 'megama_b'::text, 'hakbatza'::text]));

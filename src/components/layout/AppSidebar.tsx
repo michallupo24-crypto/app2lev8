@@ -138,7 +138,8 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     adminItems.push({ title: "משימות", url: "/dashboard/teacher-assignments", icon: FileText });
   }
   if (roles.includes("parent")) {
-    adminItems.push({ title: "הילד שלי", url: "/dashboard/my-child", icon: Users });
+    adminItems.push({ title: "סקירה כללית", url: "/dashboard/my-child", icon: Users });
+    adminItems.push({ title: "שיחות", url: "/dashboard/chat", icon: MessageCircle });
   }
   if (isManagement && !isAdmin) {
     adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });

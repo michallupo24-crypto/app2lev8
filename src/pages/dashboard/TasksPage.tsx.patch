@@ -1,0 +1,4 @@
+patch note: TasksPage already has "תרגל" button that navigates to /dashboard/practice/:assignmentId
+We need to also check if the assignment has a game type in description and show game button.
+For now: SnakesLaddersMode saves game:"snakes-ladders" in description JSON.
+We add game button to TasksPage.
