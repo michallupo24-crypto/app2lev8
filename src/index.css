@@ -109,3 +109,59 @@
     font-family: 'Rubik', sans-serif;
   }
 }
+
+/* ── Stage 12: Polish ── */
+@layer base {
+  /* Smooth theme transition */
+  *, *::before, *::after {
+    transition-property: background-color, border-color, color;
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
+
+  /* Except animations — don't slow them down */
+  .animate-spin, .animate-bounce, .animate-pulse {
+    transition: none !important;
+  }
+
+  /* Better scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
+
+  /* Dark mode — fix destructive color for better visibility */
+  .dark {
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 42%;
+    --warning: 38 92% 52%;
+  }
+
+  /* Focus ring visible in both modes */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Print: hide nav, show content */
+  @media print {
+    header, aside, nav, .mobile-bottom-nav { display: none !important; }
+    main { padding: 0 !important; }
+  }
+}
+
+/* Skip to content for a11y */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  padding: 8px 16px;
+  z-index: 100;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  border-radius: 0 0 8px 0;
+}
+.skip-link:focus { top: 0; }

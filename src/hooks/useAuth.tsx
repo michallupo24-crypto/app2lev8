@@ -41,32 +41,38 @@ export const useAuth = () => {
 
     const roles = (rolesRes.data || []).map((r: any) => r.role);
 
-    // Count pending approvals relevant to this user's roles
+    // Count pending approvals — single query with IN filter
     let pendingCount = 0;
-    for (const role of roles) {
+    if (roles.length > 0) {
       const { count } = await supabase
         .from("approvals")
         .select("*", { count: "exact", head: true })
         .eq("status", "pending")
-        .eq("required_role", role);
-      pendingCount += count || 0;
+        .in("required_role", roles);
+      pendingCount = count || 0;
     }
 
-    // Count unread chat messages
+    // Count unread chat messages — single query via RPC or aggregated
     let unreadChatCount = 0;
     const { data: participations } = await supabase
       .from("conversation_participants")
       .select("conversation_id, last_read_at")
       .eq("user_id", user.id);
-    if (participations) {
-      for (const p of participations) {
-        if (p.last_read_at) {
-          const { count } = await supabase
-            .from("messages").select("*", { count: "exact", head: true })
-            .eq("conversation_id", p.conversation_id)
-            .gt("created_at", p.last_read_at);
-          unreadChatCount += count || 0;
-        }
+    if (participations && participations.length > 0) {
+      // Batch: get all messages newer than last_read_at in any of these conversations
+      const convIds = participations.map((p: any) => p.conversation_id);
+      const minReadAt = participations
+        .filter((p: any) => p.last_read_at)
+        .reduce((min: string, p: any) => p.last_read_at < min ? p.last_read_at : min,
+          participations[0]?.last_read_at || new Date().toISOString());
+      if (convIds.length > 0) {
+        const { count } = await supabase
+          .from("messages")
+          .select("*", { count: "exact", head: true })
+          .in("conversation_id", convIds)
+          .neq("sender_id", user.id)
+          .gt("created_at", minReadAt);
+        unreadChatCount = count || 0;
       }
     }
 
