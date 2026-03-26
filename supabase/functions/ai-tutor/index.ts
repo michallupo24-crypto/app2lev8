@@ -24,8 +24,14 @@ serve(async (req) => {
       context,
     } = await req.json();
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    // ── Determine Provider ────────────────────────────────────────────────
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    
+    // We will use OpenAI API directly, or fallback to an error if not configured
+    if (!OPENAI_API_KEY) {
+      console.warn("OPENAI_API_KEY is missing! Please configure it in Supabase secrets.");
+      // Temporarily use Lovable if fallback is absolutely needed, but for safety we require OPENAI
+    }
 
     // ── Build student context from DB ──────────────────────────────────────
     let studentContext = "";
@@ -34,6 +40,27 @@ serve(async (req) => {
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const sb = createClient(supabaseUrl, supabaseKey);
+
+        const { data: profile } = await sb
+          .from('profiles')
+          .select('full_name, date_of_birth')
+          .eq('id', studentId)
+          .single();
+          
+        const { data: tracks } = await sb
+          .from('student_tracks')
+          .select('track_name, track_type, level')
+          .eq('user_id', studentId);
+
+        let ageStr = "";
+        if (profile?.date_of_birth) {
+           const birthYear = new Date(profile.date_of_birth).getFullYear();
+           const currYear = new Date().getFullYear();
+           ageStr = `בגיל ${currYear - birthYear}. `;
+        }
+        
+        const trackNames = tracks?.map((t: any) => t.track_name).join(", ");
+        const trackStr = trackNames ? `נמצא במגמות/הקבצות: ${trackNames}.` : "";
 
         // Get student's recent grades (last 20 graded submissions)
         const { data: subs } = await sb
@@ -72,11 +99,20 @@ serve(async (req) => {
           const weak = sorted[sorted.length - 1]?.s;
 
           studentContext = `
-[פרופיל לימודי של התלמיד/ה]
+[פרופיל אישי וחינוכי]
+שם התלמיד: ${profile?.full_name || 'תלמיד'} ${ageStr}
+${trackStr}
 ציונים לפי מקצוע: ${subjAvgs.join(", ")}
 מקצוע חזק: ${strong || "לא ידוע"}
-מקצוע לשיפור: ${weak || "לא ידוע"}
-מספר ציונים שיש לי: ${subs.length}
+מקצוע לשיפור (דורש מיקוד וסבלנות): ${weak || "לא ידוע"}
+מספר ציונים עדכניים: ${subs.length}
+`;
+        } else if (profile) {
+           studentContext = `
+[פרופיל אישי וחינוכי]
+שם התלמיד: ${profile.full_name} ${ageStr}
+${trackStr}
+(עדיין אין ציונים כדי לחשב ממוצע)
 `;
         }
       } catch (e) {
@@ -95,14 +131,14 @@ serve(async (req) => {
 3. הצעה קצרה לשיפור.
 אל תכתוב יותר מ-4 משפטים.`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -121,6 +157,7 @@ serve(async (req) => {
     if (action === "generate_questions" || action === "scan-file") {
       const userPrompt = prompt || `צור ${numQuestions || 5} שאלות תרגול בעברית על הנושא: ${subject || assignmentTitle || "כללי"}`;
       const systemPrompt = `אתה יוצר שאלות תרגול לתלמידים בישראל.
+${studentContext ? 'הכר את התלמיד עבורו אתה יוצר שאלות:\n' + studentContext + '\nהתאם את השאלות (במיוחד במקצוע החלש) שיהיו מובנות ויכללו חשיבה מודרכת.' : ''}
 החזר JSON בלבד (ללא markdown, ללא הסברים) בפורמט הבא:
 [
   {
@@ -131,18 +168,16 @@ serve(async (req) => {
     "explanation": "..."
   }
 ]
-צור ${numQuestions || 5} שאלות. שאלות מגוונות: אמריקאי, נכון/לא-נכון, פתוח.
-לנכון/לא-נכון: options=["נכון","לא נכון"].
-לפתוח: options=[].`;
+צור ${numQuestions || 5} שאלות ברמת קושי עולה. שאלות מגוונות: אמריקאי, נכון/לא-נכון, פתוח. דגש על נושא: ${subject}.`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -179,14 +214,14 @@ ${studentContext}
 - כלול הצעות לתרגול (פלאשקארדס, בוחן קצר)
 - ענה בעברית, עם כותרות ברורות`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: `צור תוכנית לימודים למבחן ב-${examSubject} בעוד ${daysLeft} ימים` },
@@ -223,14 +258,14 @@ ${studentContext}
 - סיים תמיד בשאלה או הצעה להמשך.
 אתה ידידותי, סבלני ומעודד.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gpt-4o-mini",
         messages: [{ role: "system", content: systemPrompt }, ...messages],
         stream: true,
       }),
@@ -241,8 +276,8 @@ ${studentContext}
         return new Response(JSON.stringify({ error: "יותר מדי בקשות, נסה שוב בעוד רגע 🕐" }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      if (response.status === 402)
-        return new Response(JSON.stringify({ error: "נגמרו הקרדיטים" }), {
+      if (response.status === 402 || response.status === 401)
+        return new Response(JSON.stringify({ error: "שגיאת התחברות ל-AI (וודא שמפתח OPENAI_API_KEY מעודכן)" }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       const t = await response.text();

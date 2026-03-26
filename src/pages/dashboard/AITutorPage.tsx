@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -98,6 +99,12 @@ const AITutorPage = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Chat History
+  const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   // Student stats (loaded on mount for personalisation)
   const [studentStats, setStudentStats] = useState<{
     strongSubject: string | null;
@@ -124,6 +131,38 @@ const AITutorPage = () => {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // Load chat history (sessions)
+  useEffect(() => {
+    if (!isStudent || !profile.id) return;
+    const fetchSessions = async () => {
+      setHistoryLoading(true);
+      const { data } = await supabase
+        .from('ai_chat_sessions')
+        .select('id, title, created_at')
+        .eq('student_id', profile.id)
+        .order('updated_at', { ascending: false });
+      if (data) setSessions(data);
+      setHistoryLoading(false);
+    };
+    fetchSessions();
+  }, [profile.id, isStudent]);
+
+  const loadSession = async (id: string) => {
+    setActiveSessionId(id);
+    setMessages([]);
+    setIsLoading(true);
+    setIsSidebarOpen(false); // Close sidebar on mobile
+    const { data } = await supabase
+      .from('ai_chat_messages')
+      .select('role, content')
+      .eq('session_id', id)
+      .order('created_at', { ascending: true });
+    if (data) {
+      setMessages(data as Msg[]);
+    }
+    setIsLoading(false);
+  };
 
   // Load student stats
   useEffect(() => {
@@ -172,6 +211,30 @@ const AITutorPage = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
+    
+    let currentSessionId = activeSessionId;
+    if (!currentSessionId && isStudent) {
+      // Create new session
+      const { data } = await supabase
+        .from('ai_chat_sessions')
+        .insert({ student_id: profile.id, title: text.slice(0, 30) + (text.length > 30 ? "..." : "") })
+        .select('id').single();
+      if (data) {
+        currentSessionId = data.id;
+        setActiveSessionId(data.id);
+        setSessions(prev => [{ id: data.id, title: text.slice(0, 30) + (text.length > 30 ? "..." : ""), created_at: new Date().toISOString() }, ...prev]);
+      }
+    }
+
+    if (currentSessionId && isStudent) {
+      // Save user message
+      await supabase.from('ai_chat_messages').insert({
+        session_id: currentSessionId,
+        role: "user",
+        content: text.trim()
+      });
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
     let soFar = "";
@@ -191,7 +254,16 @@ const AITutorPage = () => {
         subject: subjectCtx,
         studentId: isStudent ? profile.id : undefined,
         onDelta: upsert,
-        onDone: () => setIsLoading(false),
+        onDone: async () => {
+          setIsLoading(false);
+          if (currentSessionId && isStudent && soFar.trim()) {
+            await supabase.from('ai_chat_messages').insert({
+              session_id: currentSessionId,
+              role: "assistant",
+              content: soFar.trim()
+            });
+          }
+        },
         signal: controller.signal,
       });
     } catch (e: any) {
@@ -204,10 +276,12 @@ const AITutorPage = () => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
   };
 
-  const clearChat = () => {
+  const startNewChat = () => {
     abortRef.current?.abort();
     setIsLoading(false);
     setMessages([]);
+    setActiveSessionId(null);
+    setIsSidebarOpen(false);
   };
 
   const generateExamPlan = async () => {
@@ -273,8 +347,45 @@ const AITutorPage = () => {
               {showStats ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             </Button>
           )}
-          {messages.length > 0 && (
-            <Button variant="ghost" size="icon" onClick={clearChat}><Trash2 className="h-4 w-4" /></Button>
+          {isStudent && (
+             <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
+               <SheetTrigger asChild>
+                 <Button variant="outline" size="sm" className="gap-1 text-xs font-heading">
+                   <Target className="h-3.5 w-3.5" /> היסטוריה
+                 </Button>
+               </SheetTrigger>
+               <SheetContent side="right" className="w-[85vw] max-w-sm p-4 flex flex-col gap-4">
+                 <SheetHeader>
+                   <SheetTitle className="font-heading text-lg">היסטוריית שיחות</SheetTitle>
+                 </SheetHeader>
+                 <Button onClick={startNewChat} className="w-full gap-2 font-heading justify-start bg-primary/10 text-primary hover:bg-primary/20" variant="ghost">
+                   <Plus className="h-4 w-4" /> שיחה חדשה
+                 </Button>
+                 <div className="flex-1 overflow-y-auto space-y-2 mt-2">
+                   {historyLoading ? (
+                     <div className="flex justify-center p-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                   ) : sessions.length === 0 ? (
+                     <p className="text-sm text-muted-foreground text-center mt-4">אין שיחות קודמות</p>
+                   ) : (
+                     sessions.map(s => (
+                       <button
+                         key={s.id}
+                         onClick={() => loadSession(s.id)}
+                         className={cn(
+                           "w-full text-right p-3 rounded-lg text-sm font-heading transition-colors border",
+                           activeSessionId === s.id ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border hover:bg-muted"
+                         )}
+                       >
+                         <p className="truncate">{s.title}</p>
+                         <p className={cn("text-[10px] mt-1 opacity-70", activeSessionId === s.id ? "text-primary-foreground" : "text-muted-foreground")}>
+                           {new Date(s.created_at).toLocaleDateString("he-IL")}
+                         </p>
+                       </button>
+                     ))
+                   )}
+                 </div>
+               </SheetContent>
+             </Sheet>
           )}
         </div>
       </div>
