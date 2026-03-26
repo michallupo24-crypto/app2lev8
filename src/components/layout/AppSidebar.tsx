@@ -20,6 +20,7 @@ import {
   Building2,
   Radio,
   Wand2,
+  Crown,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
@@ -144,10 +145,12 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     adminItems.push({ title: "שיחות", url: "/dashboard/chat", icon: MessageCircle });
   }
   if (isManagement && !isAdmin) {
+    adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: Crown });
     adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });
     adminItems.push({ title: "עץ ארגוני", url: "/dashboard/org-tree", icon: Building2 });
   }
   if (isAdmin) {
+    adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: Crown });
     adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });
     adminItems.push({ title: "עץ ארגוני מערכת", url: "/dashboard/system-org-tree", icon: Building2 });
   }

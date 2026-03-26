@@ -34,6 +34,8 @@ import CommunityPage from "./pages/dashboard/CommunityPage";
 import TeacherLiveLessonPage from "./pages/dashboard/TeacherLiveLessonPage";
 import TeacherAssignmentPage from "./pages/dashboard/TeacherAssignmentPage";
 import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
+import PrincipalDashboardPage from "./pages/dashboard/PrincipalDashboardPage";
+import SystemAdminPage from "./pages/dashboard/SystemAdminPage";
 import StudentGradesPage from "./pages/dashboard/StudentGradesPage";
 import StudentPracticePage from "./pages/dashboard/StudentPracticePage";
 import ParentDashboardPage from "./pages/dashboard/ParentDashboardPage";
@@ -65,7 +67,8 @@ const App = () => (
             <Route path="classes" element={<PlaceholderPage title="כיתות" description="ניהול כיתות, מערכת שעות ושיוכים" icon="📚" />} />
             <Route path="my-child" element={<ParentDashboardPage />} />
             <Route path="stats" element={<PlaceholderPage title="סטטיסטיקות" description="נתונים, גרפים ודוחות" icon="📊" />} />
-            <Route path="admin" element={<PlaceholderPage title="ניהול מערכת" description="הגדרות מערכת ובתי ספר" icon="🛡️" />} />
+            <Route path="admin" element={<SystemAdminPage />} />
+            <Route path="principal" element={<PrincipalDashboardPage />} />
             <Route path="org-tree" element={<SchoolOrgTreePage />} />
             <Route path="system-org-tree" element={<SystemAdminOrgTreePage />} />
             <Route path="schedule" element={<SchedulePage />} />
