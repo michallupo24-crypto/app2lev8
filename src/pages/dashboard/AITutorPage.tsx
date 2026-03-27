@@ -26,45 +26,32 @@ let cachedModel: string | null = null;
 const discoverBestModel = async (apiKey: string): Promise<string> => {
   if (cachedModel) return cachedModel;
   
-  const endpoints = ['v1', 'v1beta'];
+  // Force v1beta first - most reliable for free tier/regional keys
+  const endpoints = ['v1beta', 'v1'];
   for (const ver of endpoints) {
     try {
       const resp = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?key=${apiKey}`);
       if (!resp.ok) continue;
       const data = await resp.json();
       const models = data.models || [];
-      
-      // Filter for models that support generating content
       const supported = models.filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"));
       
-      // Priority 1: Flash models (1.5, 2.0, etc.)
       const flash = supported.find((m: any) => m.name.includes("flash"));
       if (flash) {
-        cachedModel = flash.name; // e.g., "models/gemini-1.5-flash"
+        cachedModel = flash.name;
         return flash.name;
       }
       
-      // Priority 2: Pro models
-      const pro = supported.find((m: any) => m.name.includes("pro"));
-      if (pro) {
-        cachedModel = pro.name;
-        return pro.name;
-      }
-      
-      // Fallback: first supported model
       if (supported.length > 0) {
         cachedModel = supported[0].name;
         return supported[0].name;
       }
-    } catch (e) {
-      console.warn(`Discovery on ${ver} failed:`, e);
-    }
+    } catch (e) {}
   }
-  // Default fallback if discovery fails
   return "models/gemini-1.5-flash"; 
 };
 
-/* ─── Streaming Gemini chat - Auto-Discovery Version ─── */
+/* ─── Streaming Gemini chat - Fixed Version (v1beta) ─── */
 async function streamGeminiChat({
   messages, systemPrompt, onDelta, onDone, signal,
 }: {
@@ -72,17 +59,15 @@ async function streamGeminiChat({
   onDelta: (t: string) => void; onDone: () => void; signal?: AbortSignal;
 }) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
+  if (!GEMINI_API_KEY) throw new Error("Missing AI Key");
 
-  // Step 1: Automatic Model Discovery
   const modelName = await discoverBestModel(GEMINI_API_KEY);
-  const version = modelName.includes("2.0") ? "v1beta" : "v1";
-  const url = `https://generativelanguage.googleapis.com/${version}/${modelName}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
+  // Always use v1beta for streaming - more compatible
+  const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
 
-  // Prepend instructions to the first user message (highly compatible format)
   const contents = messages.map((m, idx) => ({
     role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: idx === 0 ? `SYSTEM INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${m.content}` : m.content }]
+    parts: [{ text: idx === 0 ? `INSTRUCTIONS: ${systemPrompt}\n\nMESSAGE: ${m.content}` : m.content }]
   }));
 
   try {
