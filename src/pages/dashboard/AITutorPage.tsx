@@ -208,6 +208,14 @@ const AITutorPage = () => {
     setIsLoading(false);
   };
 
+  const startNewChat = () => {
+    abortRef.current?.abort();
+    setIsLoading(false);
+    setMessages([]);
+    setActiveSessionId(null);
+    setIsSidebarOpen(false);
+  };
+
   // Student stats loader (simplified)
   useEffect(() => {
     if (!isStudent || !profile.id) return;
