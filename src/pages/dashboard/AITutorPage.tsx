@@ -48,18 +48,16 @@ async function streamGeminiChat({
   const modelId = "gemini-1.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
 
-  const contents = messages.map(m => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }]
-  }));
-
   try {
+    const contents = messages.map((m, idx) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: idx === 0 ? `SYSTEM INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${m.content}` : m.content }]
+    }));
+
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        // Stable system instruction format for Gemini 1.5+
-        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
         generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
       }),
