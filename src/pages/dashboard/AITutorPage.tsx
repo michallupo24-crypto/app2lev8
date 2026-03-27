@@ -21,20 +21,50 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-/* ─── AI Diagnostics: Logs available models to console ─── */
-const runAIDiagnostics = async (apiKey: string) => {
-  try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
-    const data = await resp.json();
-    console.group("AI Diagnostics - Available Models");
-    console.log("Check if your model is in this list:", data.models?.map((m: any) => m.name));
-    console.groupEnd();
-  } catch (e) {
-    console.error("AI Diagnostics Failed:", e);
+/* ─── AI Auto-Discovery: Finds the best available model for your key ─── */
+let cachedModel: string | null = null;
+const discoverBestModel = async (apiKey: string): Promise<string> => {
+  if (cachedModel) return cachedModel;
+  
+  const endpoints = ['v1', 'v1beta'];
+  for (const ver of endpoints) {
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?key=${apiKey}`);
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const models = data.models || [];
+      
+      // Filter for models that support generating content
+      const supported = models.filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"));
+      
+      // Priority 1: Flash models (1.5, 2.0, etc.)
+      const flash = supported.find((m: any) => m.name.includes("flash"));
+      if (flash) {
+        cachedModel = flash.name; // e.g., "models/gemini-1.5-flash"
+        return flash.name;
+      }
+      
+      // Priority 2: Pro models
+      const pro = supported.find((m: any) => m.name.includes("pro"));
+      if (pro) {
+        cachedModel = pro.name;
+        return pro.name;
+      }
+      
+      // Fallback: first supported model
+      if (supported.length > 0) {
+        cachedModel = supported[0].name;
+        return supported[0].name;
+      }
+    } catch (e) {
+      console.warn(`Discovery on ${ver} failed:`, e);
+    }
   }
+  // Default fallback if discovery fails
+  return "models/gemini-1.5-flash"; 
 };
 
-/* ─── Streaming Gemini chat - Final Stable Version (March 2026) ─── */
+/* ─── Streaming Gemini chat - Auto-Discovery Version ─── */
 async function streamGeminiChat({
   messages, systemPrompt, onDelta, onDone, signal,
 }: {
@@ -44,16 +74,18 @@ async function streamGeminiChat({
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
   if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
 
-  // In March 2026, 'gemini-1.5-flash' is the most stable free-tier model
-  const modelId = "gemini-1.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
+  // Step 1: Automatic Model Discovery
+  const modelName = await discoverBestModel(GEMINI_API_KEY);
+  const version = modelName.includes("2.0") ? "v1beta" : "v1";
+  const url = `https://generativelanguage.googleapis.com/${version}/${modelName}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
+
+  // Prepend instructions to the first user message (highly compatible format)
+  const contents = messages.map((m, idx) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: idx === 0 ? `SYSTEM INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${m.content}` : m.content }]
+  }));
 
   try {
-    const contents = messages.map((m, idx) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: idx === 0 ? `SYSTEM INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${m.content}` : m.content }]
-    }));
-
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -66,9 +98,7 @@ async function streamGeminiChat({
 
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
-      const msg = errData.error?.message || `HTTP Error ${resp.status}`;
-      console.error("Gemini API Error:", errData);
-      throw new Error(msg);
+      throw new Error(errData.error?.message || `API Error ${resp.status}`);
     }
 
     if (!resp.body) throw new Error("No response body");
@@ -100,14 +130,15 @@ async function streamGeminiChat({
 
 async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const modelName = await discoverBestModel(GEMINI_API_KEY);
+  const version = modelName.includes("2.0") ? "v1beta" : "v1";
+  const url = `https://generativelanguage.googleapis.com/${version}/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
   
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      contents: [{ role: "user", parts: [{ text: `SYSTEM: ${systemPrompt}\n\nUSER: ${userPrompt}\n\nOUTPUT JSON ONLY.` }] }],
       generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
     })
   });
@@ -118,7 +149,7 @@ async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
 }
 
 const QUICK_PROMPTS = [
-  { label: "סכם שיעור", icon: FileText, prompt: "תסכם לי את הנושא האחרון שלמדנו בצורה מסודרת" },
+  { label: "סכם שיעור", icon: FileText, prompt: "תסכם לי את הנושא האחרון בצורה מסודרת" },
   { label: "תוכנית מבחן", icon: Calendar, prompt: "עזור לי לבנות תוכנית לימודים למבחן" },
   { label: "הסבר מושג", icon: BookOpen, prompt: "הסבר לי מושג שאני לא מבין" },
   { label: "בדוק תשובה", icon: Sparkles, prompt: "בדוק לי תשובה שכתבתי" },
@@ -142,69 +173,21 @@ const AITutorPage = () => {
   // Chat History
   const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Student stats
-  const [studentStats, setStudentStats] = useState<{
-    strongSubject: string | null;
-    weakSubject: string | null;
-    totalGrades: number;
-    subjectAvgs: Record<string, number>;
-  } | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-
-  // Exam prep / Questions
-  const [showExamPrep, setShowExamPrep] = useState(false);
-  const [examSubject, setExamSubject] = useState("");
-  const [examDays, setExamDays] = useState("7");
-  const [showGenQ, setShowGenQ] = useState(false);
-  const [genQSubject, setGenQSubject] = useState("");
-  const [genQCount, setGenQCount] = useState("5");
-  const [genQLoading, setGenQLoading] = useState(false);
-  const [generatedQs, setGeneratedQs] = useState<any[]>([]);
-
-  // Diagnostics Run
   useEffect(() => {
-    const key = import.meta.env.VITE_GEMINI_API_KEY;
-    if (key) runAIDiagnostics(key);
-  }, []);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
   // Load chat history
   useEffect(() => {
     if (!isStudent || !profile.id) return;
     const fetchSessions = async () => {
-      setHistoryLoading(true);
-      const { data } = await supabase
-        .from('ai_chat_sessions')
-        .select('id, title, created_at')
-        .eq('student_id', profile.id)
-        .order('updated_at', { ascending: false });
+      const { data } = await supabase.from('ai_chat_sessions').select('id, title, created_at').eq('student_id', profile.id).order('updated_at', { ascending: false });
       if (data) setSessions(data);
-      setHistoryLoading(false);
     };
     fetchSessions();
   }, [profile.id, isStudent]);
-
-  const loadSession = async (id: string) => {
-    setActiveSessionId(id);
-    setMessages([]);
-    setIsLoading(true);
-    setIsSidebarOpen(false);
-    const { data } = await supabase
-      .from('ai_chat_messages')
-      .select('role, content')
-      .eq('session_id', id)
-      .order('created_at', { ascending: true });
-    if (data) setMessages(data as Msg[]);
-    setIsLoading(false);
-  };
 
   const startNewChat = () => {
     abortRef.current?.abort();
@@ -214,26 +197,14 @@ const AITutorPage = () => {
     setIsSidebarOpen(false);
   };
 
-  // Student stats loader (simplified)
-  useEffect(() => {
-    if (!isStudent || !profile.id) return;
-    const load = async () => {
-      setStatsLoading(true);
-      const { data } = await supabase.from("submissions").select("grade, assignments(subject)").eq("student_id", profile.id).eq("status", "graded").limit(30);
-      if (data && data.length > 0) {
-        setStudentStats({ strongSubject: "מתמטיקה", weakSubject: "אנגלית", totalGrades: data.length, subjectAvgs: {} });
-      }
-      setStatsLoading(false);
-    };
-    load();
-  }, [profile.id, isStudent]);
-
-  const getSystemPrompt = () => {
-    return `אתה מנטור X, עוזר לימודי אישי ב-App2Class. הנחיות:
-- ענה בעברית בלבד.
-- עזור לתלמיד להבין בעצמו (אל תגלה תשובות מיד).
-- השתמש בסיכומי נקודות ואימוג'ים.
-שם התלמיד: ${profile.fullName}`;
+  const loadSession = async (id: string) => {
+    setActiveSessionId(id);
+    setMessages([]);
+    setIsLoading(true);
+    setIsSidebarOpen(false);
+    const { data } = await supabase.from('ai_chat_messages').select('role, content').eq('session_id', id).order('created_at', { ascending: true });
+    if (data) setMessages(data as Msg[]);
+    setIsLoading(false);
   };
 
   const send = async (text: string) => {
@@ -270,7 +241,7 @@ const AITutorPage = () => {
     try {
       await streamGeminiChat({
         messages: newMessages,
-        systemPrompt: getSystemPrompt(),
+        systemPrompt: `אתה מנטור X, עוזר לימודי אישי. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}`,
         onDelta: upsert,
         onDone: async () => {
           setIsLoading(false);
@@ -288,45 +259,39 @@ const AITutorPage = () => {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] md:h-[calc(100vh-5rem)] max-w-3xl mx-auto rounded-3xl overflow-hidden bg-background border shadow-2xl relative">
-
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-muted/40 backdrop-blur-md sticky top-0 z-10">
+      <div className="flex items-center justify-between p-4 border-b bg-muted/20">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg animate-pulse">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
             <Brain className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-heading text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">מנטור-X החדש</h1>
-            <p className="text-[10px] text-muted-foreground uppercase font-black">AI Tutor v3.0 | Stable</p>
+             <h1 className="font-heading text-lg font-bold">מנטור-X החדש</h1>
+             <p className="text-[10px] text-muted-foreground font-black">AUTO-DISCOVERY ACTIVE</p>
           </div>
         </div>
         <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
           <SheetTrigger asChild><Button variant="ghost" size="sm">היסטוריה</Button></SheetTrigger>
           <SheetContent>
-            <SheetHeader><SheetTitle>שיחות אחרונות</SheetTitle></SheetHeader>
-            <div className="mt-4 space-y-2">
-              {sessions.map(s => <Button key={s.id} variant="ghost" className="w-full text-right justify-start" onClick={() => loadSession(s.id)}>{s.title}</Button>)}
-              <Button onClick={startNewChat} className="w-full mt-4">שיחה חדשה</Button>
-            </div>
+             <SheetHeader><SheetTitle>שיחות אחרונות</SheetTitle></SheetHeader>
+             <div className="mt-4 space-y-2">
+                {sessions.map(s => <button key={s.id} onClick={() => loadSession(s.id)} className={cn("w-full text-right p-3 rounded-lg border text-sm", activeSessionId === s.id ? "bg-indigo-600 text-white" : "")}>{s.title}</button>)}
+                <Button onClick={startNewChat} className="w-full mt-4">שיחה חדשה</Button>
+             </div>
           </SheetContent>
         </Sheet>
       </div>
 
-      {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center animate-in fade-in duration-700">
-             <div className="w-24 h-24 rounded-[2.5rem] bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-2xl rotate-3">
+          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
+             <div className="w-24 h-24 rounded-[2.5rem] bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-2xl">
                 <Brain className="h-12 w-12 text-white" />
              </div>
-             <div>
-                <h2 className="font-heading text-2xl font-black mb-2 tracking-tight">היי {profile.fullName.split(" ")[0]}! 👋</h2>
-                <p className="text-muted-foreground text-sm max-w-xs mx-auto">אני המנטור האישי שלך. מוכן ללמוד ביחד?</p>
-             </div>
-             <div className="grid grid-cols-2 gap-3 w-full max-w-sm mt-4">
+             <h2 className="font-heading text-2xl font-black tracking-tight">היי {profile.fullName.split(" ")[0]}!</h2>
+             <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
                 {QUICK_PROMPTS.map(qp => (
-                   <button key={qp.label} onClick={() => send(qp.prompt)} className="p-4 rounded-3xl border bg-card hover:bg-indigo-50 transition-all text-center flex flex-col items-center gap-2 group shadow-sm">
-                      <qp.icon className="h-5 w-5 text-indigo-500 group-hover:scale-125 transition-transform" />
+                   <button key={qp.label} onClick={() => send(qp.prompt)} className="p-4 rounded-3xl border bg-card hover:bg-muted transition-all text-center flex flex-col items-center gap-2">
+                      <qp.icon className="h-5 w-5 text-indigo-500" />
                       <span className="text-xs font-bold">{qp.label}</span>
                    </button>
                 ))}
@@ -335,7 +300,7 @@ const AITutorPage = () => {
         ) : (
           messages.map((msg, i) => (
             <div key={i} className={cn("flex gap-3", msg.role === "user" ? "flex-row-reverse" : "flex-row")}>
-               <Card className={cn("max-w-[85%] px-5 py-3 rounded-3xl shadow-sm leading-relaxed", msg.role === "user" ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-muted/30 rounded-tl-sm")}>
+               <Card className={cn("max-w-[85%] px-5 py-3 rounded-3xl", msg.role === "user" ? "bg-indigo-600 text-white" : "bg-muted/30")}>
                   <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">{msg.content}</ReactMarkdown>
                </Card>
             </div>
@@ -343,14 +308,13 @@ const AITutorPage = () => {
         )}
       </div>
 
-      {/* Input */}
-      <div className="p-4 bg-background/80 backdrop-blur-sm border-t">
+      <div className="p-4 bg-background border-t">
         <div className="flex gap-2 items-end relative">
           <Textarea 
-            ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send(input))}
-            placeholder="איך אני יכול לעזור לך דולב? 😊" className="resize-none min-h-[60px] max-h-[150px] rounded-3xl bg-muted/30 border-none pr-14" disabled={isLoading}
+            value={input} onChange={e => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send(input))}
+            placeholder="שאל אותי משהו..." className="resize-none min-h-[60px] max-h-[150px] rounded-3xl bg-muted/40 border-none pr-14" disabled={isLoading}
           />
-          <Button size="icon" className="absolute left-3 bottom-2.5 h-10 w-10 rounded-2xl bg-indigo-600 shadow-xl" onClick={() => send(input)} disabled={!input.trim() || isLoading}>
+          <Button size="icon" className="absolute left-3 bottom-2.5 h-10 w-10 rounded-2xl bg-indigo-600" onClick={() => send(input)} disabled={!input.trim() || isLoading}>
              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-1" />}
           </Button>
         </div>
