@@ -58,10 +58,10 @@ async function streamGeminiChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            { role: 'user', parts: [{ text: `INSTRUCTIONS: ${systemPrompt}` }] },
-            ...contents
-          ],
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
         }),
         signal,
