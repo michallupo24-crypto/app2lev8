@@ -21,7 +21,14 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-/* ─── Streaming Gemini chat ─── */
+/* ─── Streaming Gemini chat with Fallback ─── */
+const GEMINI_MODELS = [
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro',
+  'gemini-2.0-flash-exp'
+];
+
 async function streamGeminiChat({
   messages, systemPrompt, onDelta, onDone, signal,
 }: {
@@ -30,7 +37,7 @@ async function streamGeminiChat({
 }) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
-    throw new Error("חסר VITE_GEMINI_API_KEY בקובץ .env ! יש ליצור מפתח חינם של גוגל ולהגדירו.");
+    throw new Error("חסר VITE_GEMINI_API_KEY בקובץ .env");
   }
 
   const contents = messages.map(m => ({
@@ -38,82 +45,97 @@ async function streamGeminiChat({
     parts: [{ text: m.content }]
   }));
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
-  
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents,
-      generationConfig: { 
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      }
-    }),
-    signal,
-  });
+  let lastError = null;
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: { message: "שגיאה בתקשורת מול גוגל" } }));
-    throw new Error(err.error?.message || `Error ${resp.status}`);
-  }
-  
-  if (!resp.body) throw new Error("No stream");
-  
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    buf += decoder.decode(value, { stream: true });
-    let lines = buf.split("\n");
-    buf = lines.pop() || "";
-    
-    for (let line of lines) {
-      line = line.trim();
-      if (!line.startsWith("data: ")) continue;
-      const jsonStr = line.slice(6).trim();
-      if (!jsonStr) continue;
+  for (const modelId of GEMINI_MODELS) {
+    try {
+      console.log(`Trying model: ${modelId}`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
       
-      try {
-        const data = JSON.parse(jsonStr);
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) onDelta(text);
-      } catch (e) {
-        console.error("Error parsing stream chunk:", e);
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+        }),
+        signal,
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        const msg = errData.error?.message || `Error ${resp.status}`;
+        console.warn(`Model ${modelId} failed: ${msg}`);
+        lastError = new Error(msg);
+        continue;
       }
+
+      if (!resp.body) throw new Error("No response body");
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (let line of lines) {
+          line = line.trim();
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+          try {
+            const data = JSON.parse(jsonStr);
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) onDelta(text);
+          } catch (e) {}
+        }
+      }
+      onDone();
+      return;
+    } catch (e: any) {
+      if (e.name === 'AbortError') throw e;
+      lastError = e;
     }
   }
-  onDone();
+  throw lastError || new Error("כל מודלי ה-AI נכשלו. בדוק חיבור אינטרנט או מפתח API.");
 }
 
 async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
   if (!GEMINI_API_KEY) throw new Error("חסר מפתח AI");
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: { 
-        responseMimeType: "application/json",
-        temperature: 0.1,
+  let lastError = null;
+  for (const modelId of GEMINI_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${GEMINI_API_KEY}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
+        })
+      });
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        lastError = new Error(errData.error?.message || "API Error");
+        continue;
       }
-    })
-  });
-  
-  if (!response.ok) throw new Error("שגיאה מול שרת ה-AI של גוגל");
-  const data = await response.json();
-  const clean = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-  return JSON.parse(clean);
+      const data = await response.json();
+      const clean = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+      return JSON.parse(clean);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
 }
+
 
 const QUICK_PROMPTS = [
   { label: "סכם שיעור", icon: FileText, prompt: "תסכם לי את הנושא האחרון שלמדנו בצורה מסודרת עם נקודות עיקריות" },
