@@ -24,9 +24,9 @@ type Msg = { role: "user" | "assistant"; content: string };
 /* ─── Streaming Gemini chat with Fallback ─── */
 const GEMINI_MODELS = [
   'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
+  'gemini-1.5-flash-latest',
   'gemini-1.5-pro',
-  'gemini-2.0-flash-exp'
+  'gemini-pro'
 ];
 
 async function streamGeminiChat({
@@ -37,7 +37,7 @@ async function streamGeminiChat({
 }) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
-    throw new Error("חסר VITE_GEMINI_API_KEY בקובץ .env");
+    throw new Error("Missing VITE_GEMINI_API_KEY in .env");
   }
 
   const contents = messages.map(m => ({
@@ -50,14 +50,18 @@ async function streamGeminiChat({
   for (const modelId of GEMINI_MODELS) {
     try {
       console.log(`Trying model: ${modelId}`);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
+      // Try v1 first, fallback to v1beta if needed
+      const endpoint = modelId === 'gemini-pro' ? 'v1beta' : 'v1';
+      const url = `https://generativelanguage.googleapis.com/${endpoint}/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;
       
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents,
+          contents: [
+            { role: 'user', parts: [{ text: `INSTRUCTIONS: ${systemPrompt}` }] },
+            ...contents
+          ],
           generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
         }),
         signal,
@@ -65,9 +69,8 @@ async function streamGeminiChat({
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
-        const msg = errData.error?.message || `Error ${resp.status}`;
-        console.warn(`Model ${modelId} failed: ${msg}`);
-        lastError = new Error(msg);
+        console.warn(`Model ${modelId} failed:`, errData);
+        lastError = new Error(errData.error?.message || `Error ${resp.status}`);
         continue;
       }
 
@@ -105,25 +108,27 @@ async function streamGeminiChat({
 
 async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) throw new Error("חסר מפתח AI");
+  if (!GEMINI_API_KEY) throw new Error("Missing AI Key");
 
   let lastError = null;
   for (const modelId of GEMINI_MODELS) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${GEMINI_API_KEY}`;
+      const endpoint = modelId === 'gemini-pro' ? 'v1beta' : 'v1';
+      const url = `https://generativelanguage.googleapis.com/${endpoint}/models/${modelId}:generateContent?key=${GEMINI_API_KEY}`;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          contents: [
+            { role: 'user', parts: [{ text: `OUTPUT JSON ONLY. INSTRUCTIONS: ${systemPrompt}` }] },
+            { role: 'user', parts: [{ text: userPrompt }] }
+          ],
           generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
         })
       });
       
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        lastError = new Error(errData.error?.message || "API Error");
+        lastError = new Error("API Error");
         continue;
       }
       const data = await response.json();
@@ -135,7 +140,6 @@ async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
   }
   throw lastError;
 }
-
 
 const QUICK_PROMPTS = [
   { label: "סכם שיעור", icon: FileText, prompt: "תסכם לי את הנושא האחרון שלמדנו בצורה מסודרת עם נקודות עיקריות" },
@@ -358,7 +362,7 @@ ${studentContext}
       });
     } catch (e: any) {
       if (e.name !== "AbortError") {
-        toast.error(e.message || "שגיאה בחיבור ל-AI של גוגל");
+        toast.error(e.message || "שגיאה בחיבור ל-AI");
         setMessages(prev => prev.slice(0, -1));
       }
       setIsLoading(false);
@@ -426,8 +430,8 @@ ${studentContext}
             <Brain className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-heading text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">מנטור-X (Google Gemini)</h1>
-            <p className="text-[10px] text-muted-foreground">עוזר לימודי אישי — מהיר וחופשי ממגבלות</p>
+            <h1 className="font-heading text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">מנטור-X (Stable)</h1>
+            <p className="text-[10px] text-muted-foreground">עוזר לימודי אישי — מהיר ויציב</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
