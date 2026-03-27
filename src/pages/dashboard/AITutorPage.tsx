@@ -160,12 +160,14 @@ const AITutorPage = () => {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [gradesContext, setGradesContext] = useState("");
+  const [calendarContext, setCalendarContext] = useState("");
 
-  // Load context grades
+  // Load context grades and upcoming tasks
   useEffect(() => {
     if (!profile?.id) return;
-    const fetchGrades = async () => {
-      const { data } = await supabase
+    const fetchTutorContext = async () => {
+      // 1. Fetch Grades
+      const { data: gradesData } = await supabase
         .from('submissions')
         .select('grade, feedback, assignments(title, subject, max_grade)')
         .eq('student_id', profile.id)
@@ -173,14 +175,39 @@ const AITutorPage = () => {
         .order('graded_at', { ascending: false })
         .limit(10);
       
-      if (data && data.length > 0) {
-        const summary = data.map((s: any) => 
-          `- ${s.assignments?.subject}: ${s.assignments?.title} | ציון: ${s.grade}/${s.assignments?.max_grade || 100}${s.feedback ? ` (משוב ממורה: ${s.feedback})` : ''}`
+      if (gradesData && gradesData.length > 0) {
+        const summary = gradesData.map((s: any) => 
+          `- ${s.assignments?.subject}: ${s.assignments?.title} | ציון: ${s.grade}/${s.assignments?.max_grade || 100}${s.feedback ? ` (משוב: ${s.feedback})` : ''}`
         ).join('\n');
-        setGradesContext(`הנה נתוני הציונים והמשובים האחרונים של התלמיד:\n${summary}`);
+        setGradesContext(`נתוני ציונים ומשובים אחרונים:\n${summary}`);
+      }
+
+      // 2. Fetch Class for Upcoming Tasks
+      const { data: profileDetails } = await supabase
+        .from('profiles')
+        .select('class_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (profileDetails?.class_id) {
+        const { data: upcoming } = await supabase
+          .from('assignments')
+          .select('title, subject, type, due_date')
+          .eq('class_id', profileDetails.class_id)
+          .eq('published', true)
+          .gte('due_date', new Date().toISOString())
+          .order('due_date', { ascending: true })
+          .limit(8);
+        
+        if (upcoming && upcoming.length > 0) {
+          const list = upcoming.map((a: any) => 
+            `- ${a.subject}: ${a.title} (${a.type === 'exam' ? 'מבחן' : 'מטלה'}) | תאריך: ${new Date(a.due_date).toLocaleDateString('he-IL')}`
+          ).join('\n');
+          setCalendarContext(`לוח מבחנים ומשימות קרובות:\n${list}`);
+        }
       }
     };
-    fetchGrades();
+    fetchTutorContext();
   }, [profile.id]);
 
   useEffect(() => {
@@ -250,7 +277,9 @@ const AITutorPage = () => {
       await streamGeminiChat({
         messages: newMessages,
         systemPrompt: `אתה מנטור X, עוזר לימודי אישי חכם ומעודד. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}.
-${gradesContext ? `יש לך גישה לציונים האחרונים של התלמיד. השתמש בהם כדי לתת עצות ממוקדות, לנתח מגמות או לענות על שאלות לגבי ההישגים שלו:\n${gradesContext}` : 'אין לך עדיין גישה לנתוני הציונים של התלמיד.'}`,
+${gradesContext ? `הנה נתוני הציונים האחרונים של התלמיד:\n${gradesContext}` : ''}
+${calendarContext ? `הנה לוח המבחנים והמשימות הקרובות של התלמיד:\n${calendarContext}` : ''}
+הנחיות: השתמש בנתונים אלו כדי לתת עצות ממוקדות, לנתח מגמות, לעזור בתכנון לו"ז למבחנים קרובים, או לענות על שאלות לגבי ההישגים שלו.`,
         onDelta: upsert,
         onDone: async () => {
           setIsLoading(false);
