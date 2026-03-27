@@ -159,6 +159,29 @@ const AITutorPage = () => {
   const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [gradesContext, setGradesContext] = useState("");
+
+  // Load context grades
+  useEffect(() => {
+    if (!profile?.id) return;
+    const fetchGrades = async () => {
+      const { data } = await supabase
+        .from('submissions')
+        .select('grade, feedback, assignments(title, subject, max_grade)')
+        .eq('student_id', profile.id)
+        .eq('status', 'graded')
+        .order('graded_at', { ascending: false })
+        .limit(10);
+      
+      if (data && data.length > 0) {
+        const summary = data.map((s: any) => 
+          `- ${s.assignments?.subject}: ${s.assignments?.title} | ציון: ${s.grade}/${s.assignments?.max_grade || 100}${s.feedback ? ` (משוב ממורה: ${s.feedback})` : ''}`
+        ).join('\n');
+        setGradesContext(`הנה נתוני הציונים והמשובים האחרונים של התלמיד:\n${summary}`);
+      }
+    };
+    fetchGrades();
+  }, [profile.id]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -226,7 +249,8 @@ const AITutorPage = () => {
     try {
       await streamGeminiChat({
         messages: newMessages,
-        systemPrompt: `אתה מנטור X, עוזר לימודי אישי. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}`,
+        systemPrompt: `אתה מנטור X, עוזר לימודי אישי חכם ומעודד. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}.
+${gradesContext ? `יש לך גישה לציונים האחרונים של התלמיד. השתמש בהם כדי לתת עצות ממוקדות, לנתח מגמות או לענות על שאלות לגבי ההישגים שלו:\n${gradesContext}` : 'אין לך עדיין גישה לנתוני הציונים של התלמיד.'}`,
         onDelta: upsert,
         onDone: async () => {
           setIsLoading(false);
