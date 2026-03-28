@@ -106,6 +106,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
 
   if (roles.includes("subject_coordinator")) {
     teacherItems.push({ title: "שיבוץ מורים", url: "/dashboard/assign-teachers", icon: GraduationCap });
+    teacherItems.push({ title: "תכנון סילבוס", url: "/dashboard/syllabus-planner", icon: BookOpen });
   }
   if (hasApprovalPower) {
     teacherItems.push({ title: "אישורים", url: "/dashboard/approvals", icon: UserCheck });

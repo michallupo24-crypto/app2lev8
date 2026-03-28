@@ -44,6 +44,7 @@ import StudentRightsPage from "./pages/dashboard/StudentRightsPage";
 import SnakesLaddersGamePage from "./pages/dashboard/SnakesLaddersGamePage";
 import TeacherGradesPage from "./pages/dashboard/TeacherGradesPage";
 import TaskStudioPage from "./pages/dashboard/TaskStudioPage";
+import SyllabusPlannerPage from "./pages/dashboard/SyllabusPlannerPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -103,6 +104,7 @@ const App = () => (
             <Route path="tutoring" element={<TutoringManagementPage />} />
             <Route path="staff-meetings" element={<StaffMeetingsPage />} />
             <Route path="grade-announcements" element={<GradeAnnouncementsPage />} />
+            <Route path="syllabus-planner" element={<SyllabusPlannerPage />} />
             <Route path="avatar-edit" element={<AvatarEditPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="event-approvals" element={<PlaceholderPage title="אישורי הורים" description="מעקב חתימות הורים לאירועים וטיולים" icon="✍️" />} />
