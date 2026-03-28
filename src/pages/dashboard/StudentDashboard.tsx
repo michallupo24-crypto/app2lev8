@@ -8,10 +8,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   BookOpen, Target, Calendar, Brain, Clock, Sun, School,
   GraduationCap, FileText, AlertCircle, MapPin, Flag, Sparkles, Loader2, Cake,
+  Megaphone,
 } from "lucide-react";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
 import CurrentLessonBanner from "@/components/dashboard/CurrentLessonBanner";
 import GamificationWidget from "@/components/gamification/GamificationWidget";
+import ClassMessenger from "@/components/dashboard/ClassMessenger";
 import { supabase } from "@/integrations/supabase/client";
 import type { UserProfile } from "@/hooks/useAuth";
 import { useStudentSubjects, filterEventsBySubjects, personalizeEventTitle } from "@/hooks/useStudentSubjects";
@@ -80,6 +82,12 @@ const StudentDashboard = () => {
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.08 } } };
   const item = { hidden: { opacity: 0, y: 15 }, show: { opacity: 1, y: 0 } };
+  const { recordActivity } = useGamification(profile.id);
+
+  // Record activity on mount
+  useEffect(() => {
+    recordActivity();
+  }, [recordActivity]);
 
   // Fetch Jerusalem time
   useEffect(() => {
@@ -302,100 +310,140 @@ ${birthdayText}
         </div>
       </motion.div>
 
-      {/* Current lesson banner */}
-      {!activeHoliday && (
-        <motion.div variants={item}>
-          <CurrentLessonBanner profile={profile} />
-        </motion.div>
-      )}
+      {/* Main Grid Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Right Content Area (Main) */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Current lesson banner */}
+          {!activeHoliday && (
+            <motion.div variants={item}>
+              <CurrentLessonBanner profile={profile} />
+            </motion.div>
+          )}
 
-      {/* Active holiday banner */}
-      {activeHoliday && (
-        <motion.div variants={item}>
-          <Card className="border-info/20 bg-info/5">
-            <CardContent className="py-3 flex items-center gap-3">
-              <Sun className="h-5 w-5 text-info shrink-0" />
-              <div>
-                <p className="font-heading font-medium text-sm">חופשת {activeHoliday.title} 🎉</p>
-                {activeHoliday.returnDate && (
-                  <p className="text-xs text-muted-foreground">חזרה ללימודים: {shortDateFmt.format(parseDate(activeHoliday.returnDate))}</p>
+          {/* AI Insight */}
+          {(aiLoading || aiInsight) && (
+            <motion.div variants={item}>
+              <Card className="border-primary/20 bg-primary/5 shadow-inner">
+                <CardContent className="py-4 flex items-start gap-4">
+                  <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                     <Brain className="h-5 w-5 text-primary shrink-0" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-heading font-black text-sm text-primary mb-1 uppercase tracking-tighter">תובנת מנטור לשבוע 🎯</p>
+                    {aiLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mr-1">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="font-medium">המנטור מחשב מסלול...</span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-foreground/80 font-medium leading-relaxed">{aiInsight}</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* This week events */}
+          <motion.div variants={item}>
+            <Card className="border-none shadow-xl bg-white/60 backdrop-blur-md overflow-hidden ring-1 ring-black/[0.03]">
+              <CardHeader className="pb-2 border-b border-slate-50 bg-slate-50/30">
+                <CardTitle className="text-sm font-heading font-black flex items-center gap-2 text-slate-700">
+                  <Clock className="h-5 w-5 text-primary" />
+                  מה קורה השבוע
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                {thisWeekEvents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    אין אירועים מתוכננים השבוע
+                  </p>
+                ) : (
+                  <ScrollArea className="max-h-[300px]">
+                    <div className="space-y-1.5">
+                      {thisWeekEvents.map((event) => {
+                        const cfg = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.other;
+                        const eventDate = parseDate(event.event_date);
+                        return (
+                          <div key={event.id} className={`flex items-center gap-3 py-2 px-3 rounded-lg border ${cfg.color}`}>
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-background/50 text-lg">
+                              {personalizeEventTitle(event.title, event.subject, trackNames).includes("מבחן") ? "📝" : "📅"}
+                            </div>
+                            <div className="flex-1 min-w-0 text-right">
+                              <p className="text-sm font-bold truncate">{personalizeEventTitle(event.title, event.subject, trackNames)}</p>
+                              <p className="text-[10px] text-muted-foreground">{hebrewDayNames[eventDate.getDay()]} {shortDateFmt.format(eventDate)}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
                 )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Status cards row */}
-      <motion.div variants={item} className="grid grid-cols-2 gap-3">
-        {nextExam && (
-          <Card className="border-destructive/20 bg-destructive/5">
-            <CardContent className="py-3 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <BookOpen className="h-4 w-4 text-destructive shrink-0" />
-                  <span className="font-heading font-medium text-xs truncate">{personalizeEventTitle(nextExam.title, nextExam.subject, trackNames)}</span>
-                </div>
-                {nextExam.subject && <p className="text-[10px] text-muted-foreground mr-5">{nextExam.subject}</p>}
-              </div>
-              <Badge className="bg-destructive/10 text-destructive border-destructive/20 shrink-0" variant="outline">
-                {dayDiff(today, parseDate(nextExam.event_date))} ימים
-              </Badge>
-            </CardContent>
-          </Card>
-        )}
-
-        {!activeHoliday && (() => {
-          const next = HOLIDAY_PERIODS.find(h => startOfDay(parseDate(h.start)) > today);
-          if (!next) return null;
-          return (
-            <Card className="border-info/20 bg-info/5">
-              <CardContent className="py-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Sparkles className="h-4 w-4 text-primary shrink-0" />
-                  <span className="font-heading font-medium text-xs truncate">{next.title}</span>
-                </div>
-                <Badge className="bg-primary/10 text-primary border-primary/20 shrink-0" variant="outline">
-                  {dayDiff(today, parseDate(next.start))} ימים
-                </Badge>
               </CardContent>
             </Card>
-          );
-        })()}
-      </motion.div>
+          </motion.div>
 
-      {/* AI Insight */}
-      {(aiLoading || aiInsight) && (
-        <motion.div variants={item}>
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="py-4 flex items-start gap-3">
-              <Brain className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-heading font-medium text-sm text-primary mb-1">תובנת מנטור לשבוע 🎯</p>
-                {aiLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>מנתח את השבוע שלך...</span>
-                  </div>
-                ) : (
-                  <p className="text-sm text-foreground/80 font-body leading-relaxed">{aiInsight}</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+          {/* Class Messenger */}
+          {profile.classId && (
+            <motion.div variants={item}>
+              <ClassMessenger classId={profile.classId} userId={profile.id} isTeacher={false} />
+            </motion.div>
+          )}
+        </div>
 
-      {/* Gamification */}
-      <motion.div variants={item}>
-        <GamificationWidget userId={profile.id} />
-      </motion.div>
+        {/* Left Sidebar Area (Stats & Gamification) */}
+        <div className="space-y-6">
+          {/* Gamification Widget */}
+          <motion.div variants={item}>
+            <GamificationWidget userId={profile.id} />
+          </motion.div>
+
+          {/* Quick Access */}
+          <motion.div variants={item}>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { icon: Trophy, label: "הישגים", path: "/dashboard/badges", color: "text-yellow-500", bg: "bg-yellow-50" },
+                { icon: BookOpen, label: "מקצועות", path: "/dashboard/subjects", color: "text-blue-500", bg: "bg-blue-50" },
+                { icon: Target, label: "משימות", path: "/dashboard/tasks", color: "text-orange-500", bg: "bg-orange-50" },
+                { icon: Brain, label: "מנטור AI", path: "/dashboard/ai-tutor", color: "text-indigo-500", bg: "bg-indigo-50" },
+              ].map((quickItem, i) => (
+                <Card 
+                  key={i} 
+                  className={`cursor-pointer transition-all hover:scale-105 active:scale-95 border-none shadow-sm ${quickItem.bg}`}
+                  onClick={() => navigate(quickItem.path)}
+                >
+                  <CardContent className="p-4 text-center">
+                    <quickItem.icon className={`h-6 w-6 mx-auto mb-1 ${quickItem.color}`} />
+                    <p className="text-[11px] font-black">{quickItem.label}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </motion.div>
+
+          {/* Next Exam Sidebar */}
+          {nextExam && (
+            <motion.div variants={item}>
+               <Card className="bg-destructive/10 border-destructive/20 overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-1 opacity-10"><BookOpen className="h-12 w-12" /></div>
+                  <CardContent className="p-4 text-center">
+                    <p className="text-[10px] font-black text-destructive uppercase tracking-widest mb-1">המבחן הקרוב</p>
+                    <h3 className="font-heading font-black text-sm mb-2">{personalizeEventTitle(nextExam.title, nextExam.subject, trackNames)}</h3>
+                    <Badge className="bg-destructive text-white border-none text-xl py-2 px-4 shadow-lg"> בעוד {dayDiff(today, parseDate(nextExam.event_date))} ימים </Badge>
+                  </CardContent>
+               </Card>
+            </motion.div>
+          )}
+        </div>
+      </div>
 
       {/* This week events */}
       <motion.div variants={item}>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-heading flex items-center gap-2">
+        <Card className="border-none shadow-xl bg-white/60 backdrop-blur-md overflow-hidden ring-1 ring-black/[0.03]">
+          <CardHeader className="pb-2 border-b border-slate-50 bg-slate-50/30">
+            <CardTitle className="text-sm font-heading font-black flex items-center gap-2 text-slate-700">
               <Clock className="h-5 w-5 text-primary" />
               מה קורה השבוע
               {holidayThisWeek && !activeHoliday && (

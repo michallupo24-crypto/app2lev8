@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, TrendingUp, TrendingDown, Minus, Award, BarChart3,
   BookOpen, Target, Loader2, MessageSquare, Send, Sparkles,
-  ChevronRight, BrainCircuit, Star,
+  ChevronRight, BrainCircuit, Star, Printer,
 } from "lucide-react";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -54,6 +53,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 const StudentGradesPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [grades, setGrades] = useState<GradeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +122,7 @@ const StudentGradesPage = () => {
       setLoadingInsight(true);
       try {
         const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+        if (!GEMINI_API_KEY) return;
         const summary = grades.slice(0, 5).map(g => `${g.subject}: ${g.grade}/${g.maxGrade}`).join(", ");
         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
           method: 'POST',
@@ -215,11 +216,21 @@ const StudentGradesPage = () => {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6 text-right" dir="rtl">
-      <motion.div variants={item}>
-        <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
-          <FileText className="h-7 w-7 text-primary" />תיק הציונים שלי
-        </h1>
-        <p className="text-sm text-muted-foreground font-body mt-1">ציונים, ממוצעים, מגמות והשוואה לכיתה</p>
+      <motion.div variants={item} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
+            <FileText className="h-7 w-7 text-primary" />תיק הציונים שלי
+          </h1>
+          <p className="text-sm text-muted-foreground font-body mt-1">ציונים, ממוצעים, מגמות והשוואה לכיתה</p>
+        </div>
+        
+        <Button 
+          variant="outline" 
+          onClick={() => navigate(`/dashboard/report/${profile.id}`)}
+          className="gap-2 border-primary/20 text-primary hover:bg-primary/5 rounded-xl font-heading shadow-sm"
+        >
+          <Printer className="h-4 w-4" /> הפק תעודת רבעון מעוצבת
+        </Button>
       </motion.div>
 
       <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-4 gap-4">

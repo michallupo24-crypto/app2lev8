@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,7 @@ const PERCENTILE_BINS = [
 
 const TeacherGradesPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
@@ -118,8 +119,10 @@ const TeacherGradesPage = () => {
         .select("grade, assignments(subject, max_grade, class_id)")
         .eq("status", "graded").not("grade", "is", null);
       if (!data) return;
-      const classData = data.filter((s: any) => s.assignments?.class_id === selectedClass);
+      
+      const classData = (data as any[]).filter((s: any) => s.assignments?.class_id === selectedClass);
       const bySubject = new Map<string, number[]>();
+      
       classData.forEach((s: any) => {
         const subj = s.assignments?.subject;
         const maxG = s.assignments?.max_grade || 100;
@@ -327,6 +330,15 @@ const TeacherGradesPage = () => {
                             )}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0 hover:text-primary"
+                              onClick={() => navigate(`/dashboard/report/${sg.studentId}`)}
+                              title="צפה בתעודת רבעון"
+                            >
+                               <FileText className="h-4 w-4" />
+                            </Button>
                             {sg.grade !== null ? (
                               <>
                                 <span className={`font-heading font-bold text-lg ${gradeColor(normalized!)}`}>{sg.grade}</span>

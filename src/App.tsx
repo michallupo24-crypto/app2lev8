@@ -19,32 +19,11 @@ import TasksPage from "./pages/dashboard/TasksPage";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
 import RollCallPage from "./pages/dashboard/RollCallPage";
 import TeacherAssignmentsPage from "./pages/dashboard/TeacherAssignmentsPage";
-import GradeCoordinatorDashboard from "./pages/dashboard/GradeCoordinatorDashboard";
-import MasterSchedulerPage from "./pages/dashboard/MasterSchedulerPage";
-import GradeProgressPage from "./pages/dashboard/GradeProgressPage";
-import TutoringManagementPage from "./pages/dashboard/TutoringManagementPage";
-import StaffMeetingsPage from "./pages/dashboard/StaffMeetingsPage";
-import GradeAnnouncementsPage from "./pages/dashboard/GradeAnnouncementsPage";
-import AITutorPage from "./pages/dashboard/AITutorPage";
-import AvatarEditPage from "./pages/dashboard/AvatarEditPage";
-import ChatPage from "./pages/dashboard/ChatPage";
-import SchoolOrgTreePage from "./pages/dashboard/SchoolOrgTreePage";
-import SchedulePage from "./pages/dashboard/SchedulePage";
-import CommunityPage from "./pages/dashboard/CommunityPage";
-import TeacherLiveLessonPage from "./pages/dashboard/TeacherLiveLessonPage";
-import TeacherAssignmentPage from "./pages/dashboard/TeacherAssignmentPage";
-import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
-import PrincipalDashboardPage from "./pages/dashboard/PrincipalDashboardPage";
-import SystemAdminPage from "./pages/dashboard/SystemAdminPage";
-import StudentGradesPage from "./pages/dashboard/StudentGradesPage";
-import StudentPracticePage from "./pages/dashboard/StudentPracticePage";
-import ParentDashboardPage from "./pages/dashboard/ParentDashboardPage";
-import StudentLiveLessonPage from "./pages/dashboard/StudentLiveLessonPage";
-import StudentRightsPage from "./pages/dashboard/StudentRightsPage";
-import SnakesLaddersGamePage from "./pages/dashboard/SnakesLaddersGamePage";
 import TeacherGradesPage from "./pages/dashboard/TeacherGradesPage";
 import TaskStudioPage from "./pages/dashboard/TaskStudioPage";
 import SyllabusPlannerPage from "./pages/dashboard/SyllabusPlannerPage";
+import StudentReportPage from "./pages/dashboard/StudentReportPage";
+import BadgesPage from "./pages/dashboard/BadgesPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -83,6 +62,8 @@ const App = () => (
             <Route path="tasks" element={<TasksPage />} />
             <Route path="ai-tutor" element={<AITutorPage />} />
             <Route path="grades" element={<StudentGradesPage />} />
+            <Route path="report/:studentId" element={<StudentReportPage />} />
+            <Route path="badges" element={<BadgesPage />} />
             <Route path="practice/:assignmentId" element={<StudentPracticePage />} />
             <Route path="live-student" element={<StudentLiveLessonPage />} />
             <Route path="rights" element={<StudentRightsPage />} />

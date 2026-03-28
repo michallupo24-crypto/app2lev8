@@ -97,10 +97,24 @@ export function useGamification(userId: string | undefined): GamificationData {
       }
     }
 
+    // Check for Academic Badges (e.g. Perfect Score)
+    const { data: grades } = await supabase.from("submissions").select("grade").eq("student_id", userId).eq("status", "graded");
+    if (grades && grades.some(g => g.grade === 100)) {
+       await supabase.rpc("check_and_award_badge", {
+          p_user_id: userId, p_badge_key: "perfect_score",
+          p_badge_label: "מצוינות מושלמת 💯", p_badge_icon: "💯", p_category: "academic",
+        });
+    }
+
     // Ensure reliability record exists
-    const { data: relData } = await supabase.from("user_reliability").select("id").eq("user_id", userId).single();
+    const { data: relData } = await supabase.from("user_reliability").select("id, score").eq("user_id", userId).single();
     if (!relData) {
       await supabase.from("user_reliability").insert({ user_id: userId, score: 50 });
+    } else if (relData.score >= 90) {
+       await supabase.rpc("check_and_award_badge", {
+          p_user_id: userId, p_badge_key: "faction_guardian",
+          p_badge_label: BADGE_DEFS.faction_guardian.label, p_badge_icon: BADGE_DEFS.faction_guardian.icon, p_category: BADGE_DEFS.faction_guardian.category,
+        });
     }
 
     await loadData();
