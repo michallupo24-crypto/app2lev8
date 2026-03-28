@@ -104,29 +104,34 @@ const ParentRegistration = () => {
       const userId = authData.user.id;
 
       // Update profile
-      await supabase.from("profiles").update({
+      const { error: profileError } = await supabase.from("profiles").update({
         full_name: fullName,
         phone,
         id_number: null,
         school_id: childSchoolId,
       }).eq("id", userId);
 
+      if (profileError) throw profileError;
+
       // Add parent role
-      await supabase.from("user_roles").insert({
+      const { error: roleError } = await supabase.from("user_roles").insert({
         user_id: userId,
         role: "parent" as any,
       });
 
+      if (roleError) throw roleError;
+
       // Link parent to student
       if (verifiedStudentId) {
-        await supabase.from("parent_student").insert({
+        const { error: linkError } = await supabase.from("parent_student").insert({
           parent_id: userId,
           student_id: verifiedStudentId,
         });
+        if (linkError) throw linkError;
       }
 
       // Save avatar
-      await supabase.from("avatars").insert({
+      const { error: avatarError } = await supabase.from("avatars").insert({
         user_id: userId,
         face_shape: avatar.faceShape,
         skin_color: avatar.skinColor,
@@ -142,12 +147,16 @@ const ParentRegistration = () => {
         background: avatar.background,
       });
 
+      if (avatarError) throw avatarError;
+
       // Approval
-      await supabase.from("approvals").insert({
+      const { error: approvalError } = await supabase.from("approvals").insert({
         user_id: userId,
         required_role: "educator" as any,
         notes: `הורה חדש/ה: ${fullName}, ילד/ה: ${childName}`,
       });
+
+      if (approvalError) throw approvalError;
 
       await supabase.auth.signOut();
       setStep(3);
