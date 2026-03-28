@@ -85,25 +85,16 @@ const StudentGradesPage = () => {
       const avgMap = new Map<string, number>();
 
       if (assignmentIds.length > 0) {
-        const { data: allSubs } = await supabase
-          .from("submissions")
-          .select("assignment_id, grade, assignments(max_grade)")
-          .in("assignment_id", assignmentIds)
-          .eq("status", "graded")
-          .not("grade", "is", null);
-
-        if (allSubs) {
-          const grouped = new Map<string, number[]>();
-          allSubs.forEach((s: any) => {
-            const maxG = s.assignments?.max_grade || 100;
-            const norm = (s.grade / maxG) * 100;
-            const list = grouped.get(s.assignment_id) || [];
-            list.push(norm);
-            grouped.set(s.assignment_id, list);
+        const { data: rpcAvgs, error: rpcError } = await supabase.rpc('get_assignment_averages', { 
+          p_assignment_ids: assignmentIds 
+        });
+        
+        if (!rpcError && rpcAvgs) {
+          rpcAvgs.forEach((avg: any) => {
+            avgMap.set(avg.assignment_id, avg.avg_grade);
           });
-          grouped.forEach((gs, aId) => {
-            avgMap.set(aId, Math.round(gs.reduce((a, b) => a + b, 0) / gs.length));
-          });
+        } else if (rpcError) {
+          console.error("RPC Error fetching averages:", rpcError);
         }
       }
 
