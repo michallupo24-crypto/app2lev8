@@ -1,3 +1,4 @@
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,8 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, TrendingUp, TrendingDown, Minus, Award, BarChart3,
   BookOpen, Target, Loader2, MessageSquare, Send, Sparkles,
-  ChevronRight, BrainCircuit, Star, Printer,
+  ChevronRight, BrainCircuit, Star, Printer, Zap, Trophy,
 } from "lucide-react";
+import { useGamification } from "@/hooks/useGamification";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -64,6 +66,15 @@ const StudentGradesPage = () => {
   const [sendingAppeal, setSendingAppeal] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
+  const { badges, streak } = useGamification(profile.id);
+
+  const stats_gamified = useMemo(() => {
+    const totalBadges = badges.length;
+    const activeDays = streak?.total_active_days || 0;
+    const xp = (activeDays * 10) + (totalBadges * 100);
+    const lvl = Math.floor(xp / 500) + 1;
+    return { lvl, xp };
+  }, [badges, streak]);
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
   const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -217,20 +228,39 @@ const StudentGradesPage = () => {
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6 text-right" dir="rtl">
       <motion.div variants={item} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
-            <FileText className="h-7 w-7 text-primary" />תיק הציונים שלי
-          </h1>
-          <p className="text-sm text-muted-foreground font-body mt-1">ציונים, ממוצעים, מגמות והשוואה לכיתה</p>
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20">
+              <Zap className="h-8 w-8 text-primary fill-primary/20" />
+            </div>
+            <Badge className="absolute -bottom-2 -right-2 bg-primary text-white border-2 border-background px-1.5 h-6 font-black">
+              LVL {stats_gamified.lvl}
+            </Badge>
+          </div>
+          <div>
+            <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
+              <FileText className="h-7 w-7 text-primary" />תיק הציונים שלי
+            </h1>
+            <p className="text-sm text-muted-foreground font-body mt-1">ציונים, ממוצעים, מגמות והשוואה לכיתה</p>
+          </div>
         </div>
         
-        <Button 
-          variant="outline" 
-          onClick={() => navigate(`/dashboard/report/${profile.id}`)}
-          className="gap-2 border-primary/20 text-primary hover:bg-primary/5 rounded-xl font-heading shadow-sm"
-        >
-          <Printer className="h-4 w-4" /> הפק תעודת רבעון מעוצבת
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => navigate(`/dashboard/report/${profile.id}`)}
+            className="gap-2 border-primary/20 text-primary hover:bg-primary/5 rounded-xl font-heading shadow-sm"
+          >
+            <Printer className="h-4 w-4" /> הפק תעודה
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => navigate("/dashboard/badges")}
+            className="gap-2 border-yellow-500/20 text-yellow-600 hover:bg-yellow-500/5 rounded-xl font-heading shadow-sm"
+          >
+            <Trophy className="h-4 w-4" /> {badges.length} מדליות
+          </Button>
+        </div>
       </motion.div>
 
       <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-4 gap-4">

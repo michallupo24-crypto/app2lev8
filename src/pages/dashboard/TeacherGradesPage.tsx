@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BarChart3, Users, TrendingUp, TrendingDown, AlertTriangle, Award,
-  Loader2, FileText, Save, CheckCircle2, BookOpen,
+  Loader2, FileText, Save, CheckCircle2, BookOpen, Zap, Trophy,
 } from "lucide-react";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -96,13 +96,32 @@ const TeacherGradesPage = () => {
       setLoading(true);
       const { data: students } = await supabase.from("profiles").select("id, full_name").eq("class_id", selectedClass).order("full_name");
       const { data: submissions } = await supabase.from("submissions").select("id, student_id, grade, status, feedback").eq("assignment_id", selectedAssignment);
+      
+      // Gamer stats
+      const studentIds = (students || []).map(s => s.id);
+      const { data: bData } = await supabase.from("user_badges").select("user_id").in("user_id", studentIds);
+      const { data: sData } = await supabase.from("user_streaks").select("user_id, total_active_days").in("user_id", studentIds);
+      
+      const badgeMap = new Map<string, number>();
+      bData?.forEach(b => badgeMap.set(b.user_id, (badgeMap.get(b.user_id) || 0) + 1));
+      
+      const streakMap = new Map<string, number>();
+      sData?.forEach(s => streakMap.set(s.user_id, s.total_active_days || 0));
+
       const subMap = new Map((submissions || []).map((s: any) => [s.student_id, s]));
       setStudentGrades((students || []).map((st: any) => {
         const sub = subMap.get(st.id);
+        const bCount = badgeMap.get(st.id) || 0;
+        const activeDays = streakMap.get(st.id) || 0;
+        const xp = (activeDays * 10) + (bCount * 100);
+        const lvl = Math.floor(xp / 500) + 1;
+
         return {
           submissionId: sub?.id || null, studentId: st.id, studentName: st.full_name,
           grade: sub?.grade ?? null, status: sub?.status || "draft", feedback: sub?.feedback || null,
           hasAppeal: sub?.feedback?.startsWith("[ערעור") || false,
+          level: lvl,
+          badgeCount: bCount,
         };
       }));
       setGradeEdits({});
@@ -322,6 +341,16 @@ const TeacherGradesPage = () => {
                         <div key={sg.studentId} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <span className="font-heading text-sm truncate">{sg.studentName}</span>
+                            <div className="flex items-center gap-1.5 mr-2">
+                               <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-primary/5 border-primary/20 text-primary">
+                                  <Zap className="h-2.5 w-2.5 fill-primary" />
+                                  LVL {sg.level}
+                               </Badge>
+                               <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-yellow-500/5 border-yellow-500/20 text-yellow-600">
+                                  <Trophy className="h-2.5 w-2.5 fill-yellow-500/20" />
+                                  {sg.badgeCount}
+                               </Badge>
+                            </div>
                             {sg.hasAppeal && (
                               <Badge variant="outline" className="text-[10px] text-orange-500 border-orange-300">⚠ ערעור</Badge>
                             )}

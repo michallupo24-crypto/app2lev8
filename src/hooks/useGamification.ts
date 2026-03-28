@@ -1,5 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { Award } from "lucide-react";
+import React from "react";
 
 export interface UserBadge {
   badge_key: string;
@@ -72,7 +75,7 @@ export function useGamification(userId: string | undefined): GamificationData {
     await supabase.rpc("update_user_streak", { p_user_id: userId });
     
     // Check for pioneer badge (first login)
-    await supabase.rpc("check_and_award_badge", {
+    const { data: pioneerAwarded } = await supabase.rpc("check_and_award_badge", {
       p_user_id: userId,
       p_badge_key: "pioneer",
       p_badge_label: BADGE_DEFS.pioneer.label,
@@ -80,30 +83,39 @@ export function useGamification(userId: string | undefined): GamificationData {
       p_category: BADGE_DEFS.pioneer.category,
     });
 
+    if (pioneerAwarded) {
+      toast.success("מדליה חדשה! 🏴", {
+        description: `כל הכבוד! הרווחת את המדליה: ${BADGE_DEFS.pioneer.label}`,
+      });
+    }
+
     // Check streak badges
     const { data: streakData } = await supabase.from("user_streaks").select("current_streak").eq("user_id", userId).single();
     if (streakData) {
       if (streakData.current_streak >= 7) {
-        await supabase.rpc("check_and_award_badge", {
+        const { data: s7 } = await supabase.rpc("check_and_award_badge", {
           p_user_id: userId, p_badge_key: "streak_7",
           p_badge_label: BADGE_DEFS.streak_7.label, p_badge_icon: BADGE_DEFS.streak_7.icon, p_category: BADGE_DEFS.streak_7.category,
         });
+        if (s7) toast.success("איזו התמדה! 🔥", { description: "הרווחת מדליית שבוע רצוף!" });
       }
       if (streakData.current_streak >= 30) {
-        await supabase.rpc("check_and_award_badge", {
+        const { data: s30 } = await supabase.rpc("check_and_award_badge", {
           p_user_id: userId, p_badge_key: "streak_30",
           p_badge_label: BADGE_DEFS.streak_30.label, p_badge_icon: BADGE_DEFS.streak_30.icon, p_category: BADGE_DEFS.streak_30.category,
         });
+        if (s30) toast.success("אגדה חיה! 💎", { description: "חודש שלם של למידה רצופה!" });
       }
     }
 
     // Check for Academic Badges (e.g. Perfect Score)
     const { data: grades } = await supabase.from("submissions").select("grade").eq("student_id", userId).eq("status", "graded");
     if (grades && grades.some(g => g.grade === 100)) {
-       await supabase.rpc("check_and_award_badge", {
+       const { data: perf } = await supabase.rpc("check_and_award_badge", {
           p_user_id: userId, p_badge_key: "perfect_score",
           p_badge_label: "מצוינות מושלמת 💯", p_badge_icon: "💯", p_category: "academic",
         });
+        if (perf) toast.success("גאונות! 💯", { description: "קיבלת 100 במבחן והרווחת מדליה!" });
     }
 
     // Ensure reliability record exists
@@ -111,10 +123,11 @@ export function useGamification(userId: string | undefined): GamificationData {
     if (!relData) {
       await supabase.from("user_reliability").insert({ user_id: userId, score: 50 });
     } else if (relData.score >= 90) {
-       await supabase.rpc("check_and_award_badge", {
+       const { data: guardian } = await supabase.rpc("check_and_award_badge", {
           p_user_id: userId, p_badge_key: "faction_guardian",
           p_badge_label: BADGE_DEFS.faction_guardian.label, p_badge_icon: BADGE_DEFS.faction_guardian.icon, p_category: BADGE_DEFS.faction_guardian.category,
         });
+        if (guardian) toast.success("נאמן פלג! 🛡️", { description: "מדד האמינות שלך הגיע לשיא!" });
     }
 
     await loadData();
