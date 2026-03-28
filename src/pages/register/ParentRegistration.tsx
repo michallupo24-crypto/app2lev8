@@ -29,6 +29,7 @@ const ParentRegistration = () => {
   const [childId, setChildId] = useState("");
   const [childSchoolId, setChildSchoolId] = useState("");
   const [childVerified, setChildVerified] = useState<boolean | null>(null);
+  const [verifiedStudentId, setVerifiedStudentId] = useState<string | null>(null);
 
   // Avatar
   const [avatar, setAvatar] = useState<AvatarConfig>({
@@ -64,9 +65,11 @@ const ParentRegistration = () => {
 
       if (data && data.length > 0) {
         setChildVerified(true);
+        setVerifiedStudentId(data[0].id);
         toast({ title: `הילד/ה ${data[0].full_name} אומת/ה ✅` });
       } else {
         setChildVerified(false);
+        setVerifiedStudentId(null);
         toast({
           title: "הילד/ה לא נמצא/ה",
           description: "ודא שהתלמיד/ה רשום/ה במערכת ושם בית הספר נכון",
@@ -115,17 +118,10 @@ const ParentRegistration = () => {
       });
 
       // Link parent to student
-      const { data: studentProfile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id_number", childId)
-        .eq("school_id", childSchoolId)
-        .single();
-
-      if (studentProfile) {
+      if (verifiedStudentId) {
         await supabase.from("parent_student").insert({
           parent_id: userId,
-          student_id: studentProfile.id,
+          student_id: verifiedStudentId,
         });
       }
 
