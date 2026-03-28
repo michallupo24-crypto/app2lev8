@@ -22,7 +22,7 @@ import {
 
 interface ClassOption { id: string; grade: string; number: number; }
 interface AssignmentOption { id: string; title: string; subject: string; type: string; maxGrade: number; weight: number; dueDate?: string; }
-interface StudentGrade { submissionId: string | null; studentId: string; studentName: string; grade: number | null; status: string; feedback: string | null; hasAppeal?: boolean; }
+interface StudentGrade { submissionId: string | null; studentId: string; studentName: string; grade: number | null; status: string; feedback: string | null; hasAppeal?: boolean; level?: number; badgeCount?: number; }
 interface SubjectAvg { subject: string; avg: number; count: number; }
 
 const TYPE_LABELS: Record<string, string> = {

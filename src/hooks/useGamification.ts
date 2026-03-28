@@ -1,8 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Award } from "lucide-react";
-import React from "react";
 
 export interface UserBadge {
   badge_key: string;
