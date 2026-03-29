@@ -17,6 +17,8 @@ import ClassMessenger from "@/components/dashboard/ClassMessenger";
 import { supabase } from "@/integrations/supabase/client";
 import type { UserProfile } from "@/hooks/useAuth";
 import { useStudentSubjects, filterEventsBySubjects, personalizeEventTitle } from "@/hooks/useStudentSubjects";
+import { useGamification } from "@/hooks/useGamification";
+
 
 type GradeEvent = {
   id: string;
