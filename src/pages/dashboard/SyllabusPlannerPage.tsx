@@ -466,23 +466,4 @@ const SyllabusPlannerPage = () => {
 };
 
 export default SyllabusPlannerPage;
-         </motion.div>
-        )}
-      </div>
 
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="p-4 flex items-start gap-4">
-          <Info className="h-6 w-6 text-primary mt-1 shrink-0" />
-          <div className="space-y-1">
-            <h4 className="font-heading font-bold text-primary">איך זה עובד?</h4>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              המערכת סופרת את הפולי של שיעורי ההוראה המשובצים במערכת השעות עבור הכיתה שנבחרה. מכלל השיעורים, המערכת מחסירה באופן אוטומטי חגים רלוונטיים ואירועי בית ספר (טיולים, מבחנים) שהוזנו בלוח. בסוף מתקבלת התחזית המדויקת של כמות השיעורים שבם באמת ניתן ללמד עד לתאריך היעד.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-};
-
-export default SyllabusPlannerPage;
