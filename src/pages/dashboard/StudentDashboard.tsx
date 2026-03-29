@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   BookOpen, Target, Calendar, Brain, Clock, Sun, School,
   GraduationCap, FileText, AlertCircle, MapPin, Flag, Sparkles, Loader2, Cake,
-  Megaphone,
+  Megaphone, Trophy,
 } from "lucide-react";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
 import CurrentLessonBanner from "@/components/dashboard/CurrentLessonBanner";
