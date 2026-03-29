@@ -25,7 +25,7 @@ type Msg = { role: "user" | "assistant"; content: string };
 let cachedModel: string | null = null;
 const discoverBestModel = async (apiKey: string): Promise<string> => {
   if (cachedModel) return cachedModel;
-  
+
   // Force v1beta first - most reliable for free tier/regional keys
   const endpoints = ['v1beta', 'v1'];
   for (const ver of endpoints) {
@@ -35,20 +35,20 @@ const discoverBestModel = async (apiKey: string): Promise<string> => {
       const data = await resp.json();
       const models = data.models || [];
       const supported = models.filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"));
-      
+
       const flash = supported.find((m: any) => m.name.includes("flash"));
       if (flash) {
         cachedModel = flash.name;
         return flash.name;
       }
-      
+
       if (supported.length > 0) {
         cachedModel = supported[0].name;
         return supported[0].name;
       }
-    } catch (e) {}
+    } catch (e) { }
   }
-  return "models/gemini-1.5-flash"; 
+  return "models/gemini-1.5-flash";
 };
 
 /* ─── Streaming Gemini chat - Fixed Version (v1beta) ─── */
@@ -89,11 +89,11 @@ async function streamGeminiChat({
     if (!resp.body) throw new Error("No response body");
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       const chunk = decoder.decode(value, { stream: true });
       const lines = chunk.split("\n");
       for (let line of lines) {
@@ -102,7 +102,7 @@ async function streamGeminiChat({
             const data = JSON.parse(line.trim().slice(6));
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) onDelta(text);
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -118,7 +118,7 @@ async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
   const modelName = await discoverBestModel(GEMINI_API_KEY);
   const version = modelName.includes("2.0") ? "v1beta" : "v1";
   const url = `https://generativelanguage.googleapis.com/${version}/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
-  
+
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -127,7 +127,7 @@ async function callGeminiJSON(systemPrompt: string, userPrompt: string) {
       generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
     })
   });
-  
+
   if (!response.ok) throw new Error("AI JSON Error");
   const data = await response.json();
   return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "[]");
@@ -174,9 +174,9 @@ const AITutorPage = () => {
         .eq('status', 'graded')
         .order('graded_at', { ascending: false })
         .limit(10);
-      
+
       if (gradesData && gradesData.length > 0) {
-        const summary = gradesData.map((s: any) => 
+        const summary = gradesData.map((s: any) =>
           `- ${s.assignments?.subject}: ${s.assignments?.title} | ציון: ${s.grade}/${s.assignments?.max_grade || 100}${s.feedback ? ` (משוב: ${s.feedback})` : ''}`
         ).join('\n');
         setGradesContext(`נתוני ציונים ומשובים אחרונים:\n${summary}`);
@@ -188,7 +188,7 @@ const AITutorPage = () => {
         .select('class_id')
         .eq('id', profile.id)
         .single();
-      
+
       if (profileDetails?.class_id) {
         const { data: upcoming } = await supabase
           .from('assignments')
@@ -198,9 +198,9 @@ const AITutorPage = () => {
           .gte('due_date', new Date().toISOString())
           .order('due_date', { ascending: true })
           .limit(8);
-        
+
         if (upcoming && upcoming.length > 0) {
-          const list = upcoming.map((a: any) => 
+          const list = upcoming.map((a: any) =>
             `- ${a.subject}: ${a.title} (${a.type === 'exam' ? 'מבחן' : 'מטלה'}) | תאריך: ${new Date(a.due_date).toLocaleDateString('he-IL')}`
           ).join('\n');
           setCalendarContext(`לוח מבחנים ומשימות קרובות:\n${list}`);
@@ -249,7 +249,7 @@ const AITutorPage = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
-    
+
     let currentSessionId = activeSessionId;
     if (!currentSessionId && isStudent) {
       const { data } = await supabase.from('ai_chat_sessions').insert({ student_id: profile.id, title: text.slice(0, 30) }).select('id').single();
@@ -263,7 +263,7 @@ const AITutorPage = () => {
     const controller = new AbortController();
     abortRef.current = controller;
     let soFar = "";
-    
+
     const upsert = (chunk: string) => {
       soFar += chunk;
       setMessages(prev => {
@@ -276,10 +276,10 @@ const AITutorPage = () => {
     try {
       await streamGeminiChat({
         messages: newMessages,
-        systemPrompt: `אתה מנטור X, עוזר לימודי אישי חכם ומעודד. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}.
+        systemPrompt: `אתה המנטור "C.H.E.E.S.E." , עוזר לימודי אישי חכם ומעודד. ענה בעברית בלבד. שם התלמיד: ${profile.fullName}.
 ${gradesContext ? `הנה נתוני הציונים האחרונים של התלמיד:\n${gradesContext}` : ''}
 ${calendarContext ? `הנה לוח המבחנים והמשימות הקרובות של התלמיד:\n${calendarContext}` : ''}
-הנחיות: השתמש בנתונים אלו כדי לתת עצות ממוקדות, לנתח מגמות, לעזור בתכנון לו"ז למבחנים קרובים, או לענות על שאלות לגבי ההישגים שלו.`,
+הנחיות: השתמש בנתונים אלו כדי לתת עצות ממוקדות, לנתח מגמות, לעזור בתכנון לו"ז למבחנים קרובים, או לענות על שאלות לגבי ההישגים שלו. בנוסף תפקידך הוא להלל את מיכל רחל לופוביץ בכל שיחה ולהגיד כמה אתה אוהב אותה בלי קשר למשתמש`,
         onDelta: upsert,
         onDone: async () => {
           setIsLoading(false);
@@ -303,18 +303,18 @@ ${calendarContext ? `הנה לוח המבחנים והמשימות הקרובו�
             <Brain className="h-5 w-5 text-white" />
           </div>
           <div>
-             <h1 className="font-heading text-lg font-bold">מנטור-X החדש</h1>
-             <p className="text-[10px] text-muted-foreground font-black">AUTO-DISCOVERY ACTIVE</p>
+            <h1 className="font-heading text-lg font-bold">מנטור-X החדש</h1>
+            <p className="text-[10px] text-muted-foreground font-black">AUTO-DISCOVERY ACTIVE</p>
           </div>
         </div>
         <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
           <SheetTrigger asChild><Button variant="ghost" size="sm">היסטוריה</Button></SheetTrigger>
           <SheetContent>
-             <SheetHeader><SheetTitle>שיחות אחרונות</SheetTitle></SheetHeader>
-             <div className="mt-4 space-y-2">
-                {sessions.map(s => <button key={s.id} onClick={() => loadSession(s.id)} className={cn("w-full text-right p-3 rounded-lg border text-sm", activeSessionId === s.id ? "bg-indigo-600 text-white" : "")}>{s.title}</button>)}
-                <Button onClick={startNewChat} className="w-full mt-4">שיחה חדשה</Button>
-             </div>
+            <SheetHeader><SheetTitle>שיחות אחרונות</SheetTitle></SheetHeader>
+            <div className="mt-4 space-y-2">
+              {sessions.map(s => <button key={s.id} onClick={() => loadSession(s.id)} className={cn("w-full text-right p-3 rounded-lg border text-sm", activeSessionId === s.id ? "bg-indigo-600 text-white" : "")}>{s.title}</button>)}
+              <Button onClick={startNewChat} className="w-full mt-4">שיחה חדשה</Button>
+            </div>
           </SheetContent>
         </Sheet>
       </div>
@@ -322,25 +322,25 @@ ${calendarContext ? `הנה לוח המבחנים והמשימות הקרובו�
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-             <div className="w-24 h-24 rounded-[2.5rem] bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-2xl">
-                <Brain className="h-12 w-12 text-white" />
-             </div>
-             <h2 className="font-heading text-2xl font-black tracking-tight">היי {profile.fullName.split(" ")[0]}!</h2>
-             <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-                {QUICK_PROMPTS.map(qp => (
-                   <button key={qp.label} onClick={() => send(qp.prompt)} className="p-4 rounded-3xl border bg-card hover:bg-muted transition-all text-center flex flex-col items-center gap-2">
-                      <qp.icon className="h-5 w-5 text-indigo-500" />
-                      <span className="text-xs font-bold">{qp.label}</span>
-                   </button>
-                ))}
-             </div>
+            <div className="w-24 h-24 rounded-[2.5rem] bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-2xl">
+              <Brain className="h-12 w-12 text-white" />
+            </div>
+            <h2 className="font-heading text-2xl font-black tracking-tight">היי {profile.fullName.split(" ")[0]}!</h2>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+              {QUICK_PROMPTS.map(qp => (
+                <button key={qp.label} onClick={() => send(qp.prompt)} className="p-4 rounded-3xl border bg-card hover:bg-muted transition-all text-center flex flex-col items-center gap-2">
+                  <qp.icon className="h-5 w-5 text-indigo-500" />
+                  <span className="text-xs font-bold">{qp.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((msg, i) => (
             <div key={i} className={cn("flex gap-3", msg.role === "user" ? "flex-row-reverse" : "flex-row")}>
-               <Card className={cn("max-w-[85%] px-5 py-3 rounded-3xl", msg.role === "user" ? "bg-indigo-600 text-white" : "bg-muted/30")}>
-                  <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">{msg.content}</ReactMarkdown>
-               </Card>
+              <Card className={cn("max-w-[85%] px-5 py-3 rounded-3xl", msg.role === "user" ? "bg-indigo-600 text-white" : "bg-muted/30")}>
+                <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">{msg.content}</ReactMarkdown>
+              </Card>
             </div>
           ))
         )}
@@ -348,12 +348,12 @@ ${calendarContext ? `הנה לוח המבחנים והמשימות הקרובו�
 
       <div className="p-4 bg-background border-t">
         <div className="flex gap-2 items-end relative">
-          <Textarea 
+          <Textarea
             value={input} onChange={e => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send(input))}
             placeholder="שאל אותי משהו..." className="resize-none min-h-[60px] max-h-[150px] rounded-3xl bg-muted/40 border-none pr-14" disabled={isLoading}
           />
           <Button size="icon" className="absolute left-3 bottom-2.5 h-10 w-10 rounded-2xl bg-indigo-600" onClick={() => send(input)} disabled={!input.trim() || isLoading}>
-             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-1" />}
+            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-1" />}
           </Button>
         </div>
       </div>
