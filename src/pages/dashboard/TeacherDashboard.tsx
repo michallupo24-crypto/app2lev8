@@ -15,8 +15,10 @@ import {
   AlertTriangle,
   BrainCircuit,
   Settings,
-  MessageSquare
+  MessageSquare,
+  Lock
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
 import SyllabusProgressTracker from "@/components/dashboard/SyllabusProgressTracker";
 import ClassMessenger from "@/components/dashboard/ClassMessenger";
@@ -38,7 +40,9 @@ const TeacherDashboard = () => {
   const [stats, setStats] = useState<TeacherStats>({ totalStudents: 0, classCount: 0, pendingSubmissions: 0, todayLessons: 0 });
   const [myClasses, setMyClasses] = useState<{id: string, name: string}[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [coordinatorSubject, setCoordinatorSubject] = useState<string>("מתמטיקה");
   const [missingWeightsCount, setMissingWeightsCount] = useState(0);
+  const [hasSkippedRollcall, setHasSkippedRollcall] = useState(false);
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.1 } } };
   const item = { hidden: { opacity: 0, y: 15 }, show: { opacity: 1, y: 0 } };
@@ -79,15 +83,58 @@ const TeacherDashboard = () => {
         const { count: missing } = await supabase.from("grade_events")
           .select("id", { count: "exact", head: true })
           .eq("event_type", "exam")
+          .eq("subject", coordinatorSubject)
           .is("weight", null);
         setMissingWeightsCount(missing || 0);
       }
+
+      // ─── Skipped Roll Call Heuristic ───
+      const today = new Date().getDay();
+      const { data: slots } = await supabase.from("timetable_slots")
+        .select("lesson_number")
+        .eq("teacher_id", profile.id)
+        .eq("day_of_week", today);
+
+      if (slots && slots.length > 0) {
+        // Teacher has lessons today. Check if they submitted anything today.
+        const { count: lessonsToday } = await supabase.from("lessons")
+          .select("id", { count: "exact", head: true })
+          .eq("teacher_id", profile.id)
+          .gte("lesson_date", new Date().toISOString().split('T')[0]);
+
+        // If it's past noon and today's lessons weren't reported
+        if (lessonsToday === 0 && new Date().getHours() >= 12) {
+          setHasSkippedRollcall(true);
+        }
+      }
     };
     load();
-  }, [profile.id]);
+  }, [profile.id, coordinatorSubject]);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-8 p-1">
+      <Dialog open={hasSkippedRollcall}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+             <div className="mx-auto w-16 h-16 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mb-4">
+               <Lock className="w-8 h-8" />
+             </div>
+             <DialogTitle className="text-center font-heading font-black text-2xl">המערכת ננעלה: דיווח נוכחות חסר</DialogTitle>
+             <DialogDescription className="text-center text-base mt-2">
+               על פי מערכת השעות שובצו לך שיעורים היום, אך טרם הוזנה להם נוכחות. המערכת דורשת דיווח רציף.
+             </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:justify-center w-full mt-4">
+             <Button className="w-full font-bold h-12" onClick={() => { setHasSkippedRollcall(false); navigate("/dashboard/roll-call"); }}>
+                עבור מיד להזנת נוכחות
+             </Button>
+             <Button variant="outline" className="w-full text-muted-foreground" onClick={() => setHasSkippedRollcall(false)}>
+                השיעור התבטל / אירוע מיוחד
+             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
       {/* ─── WELCOME & FAST ACTIONS ─── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <motion.div variants={item} className="flex items-center gap-5">
@@ -116,21 +163,41 @@ const TeacherDashboard = () => {
       </div>
 
       {/* ─── MISSING EXAM WEIGHTS ALERT ─── */}
-      {profile.roles?.includes("subject_coordinator") && missingWeightsCount > 0 && (
+      {profile.roles?.includes("subject_coordinator") && (
         <motion.div variants={item}>
-          <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-muted/30 border rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <BrainCircuit className="h-5 w-5 text-primary" />
               <div>
-                <p className="font-heading font-bold text-destructive">התראת רכז מקצוע: אחוזי ציונים חסרים!</p>
-                <p className="text-sm text-destructive/80">
-                  ישנם {missingWeightsCount} מבחנים שתוכננו בלוח המבחנים וטרם הזנת להם אחוז שקלול. לא נוכל לחשב ציונים סופיים בלעדיהם!
-                </p>
+                <p className="font-heading font-bold text-primary">פנל רכז מקצוע</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm">המקצוע שלי:</span>
+                  <select 
+                    value={coordinatorSubject} 
+                    onChange={(e) => setCoordinatorSubject(e.target.value)} 
+                    className="bg-background border rounded-md px-2 py-1 text-sm font-bold"
+                  >
+                     <option value="מתמטיקה">מתמטיקה</option>
+                     <option value="אנגלית">אנגלית</option>
+                     <option value="לשון">לשון</option>
+                     <option value="היסטוריה">היסטוריה</option>
+                     <option value="אזרחות">אזרחות</option>
+                     <option value="ספרות">ספרות</option>
+                     <option value="מדעים">מדעים</option>
+                  </select>
+                </div>
               </div>
             </div>
-            <Button variant="destructive" size="sm" onClick={() => navigate("/dashboard/schedule")}>
-              הזן אחוזים כעת
-            </Button>
+            {missingWeightsCount > 0 ? (
+              <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-lg flex items-center gap-2 font-bold text-sm">
+                 <AlertTriangle className="h-4 w-4" /> יש {missingWeightsCount} מבחנים שחסר להם סך אחוז ציון!
+                 <Button variant="destructive" size="sm" className="ml-2 h-7" onClick={() => navigate("/dashboard/schedule")}>הזן כעת</Button>
+              </div>
+            ) : (
+               <div className="text-success text-sm flex items-center gap-1 font-bold">
+                 <CheckCircle2 className="h-4 w-4" /> כל האחוזים הוזנו
+               </div>
+            )}
           </div>
         </motion.div>
       )}

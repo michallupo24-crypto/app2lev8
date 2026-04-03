@@ -194,27 +194,19 @@ const ParentDashboardPage = () => {
         .order("graded_at", { ascending: false })
         .limit(20);
 
-      // 2. Class averages per assignment
+      // 2. Class averages per assignment (using RPC)
       const assignmentIds = (subs || []).map((s: any) => s.assignments?.id).filter(Boolean);
       let classAvgMap = new Map<string, number>();
       if (assignmentIds.length > 0) {
-        const { data: allSubs } = await supabase
-          .from("submissions")
-          .select("assignment_id, grade, assignments(max_grade)")
-          .in("assignment_id", assignmentIds)
-          .eq("status", "graded")
-          .not("grade", "is", null);
-        const grouped = new Map<string, number[]>();
-        (allSubs || []).forEach((s: any) => {
-          const maxG = s.assignments?.max_grade || 100;
-          const norm = (s.grade / maxG) * 100;
-          const list = grouped.get(s.assignment_id) || [];
-          list.push(norm);
-          grouped.set(s.assignment_id, list);
+        const { data: avgData, error } = await supabase.rpc("get_class_avgs", {
+          assignment_uids: assignmentIds
         });
-        grouped.forEach((gs, aId) => {
-          classAvgMap.set(aId, Math.round(gs.reduce((a, b) => a + b, 0) / gs.length));
-        });
+        
+        if (!error && avgData) {
+          (avgData as any[]).forEach(row => {
+            classAvgMap.set(row.assignment_id, Number(row.class_avg));
+          });
+        }
       }
 
       const recent: GradeEntry[] = (subs || []).slice(0, 10).map((s: any) => ({

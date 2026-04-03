@@ -5,7 +5,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ClipboardList, Check, X, Clock, Send, Undo2, Cake } from "lucide-react";
+import { ClipboardList, Check, X, Clock, Send, Undo2, Cake, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
 import type { UserProfile } from "@/hooks/useAuth";
 import type { AvatarConfig } from "@/components/avatar/AvatarStudio";
@@ -203,6 +209,22 @@ const SwipeableStudentRow = ({
             >
               <Clock className="h-3.5 w-3.5 mr-1" /> איחור
             </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full border border-transparent hover:border-border">
+                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 font-heading">
+                {NOTE_CATEGORIES.map(cat => (
+                  <DropdownMenuItem key={cat.value} onClick={() => onLongPress(student.id)} className="cursor-pointer flex items-center gap-2">
+                    <span>{cat.emoji}</span>
+                    <span>{cat.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </motion.div>
