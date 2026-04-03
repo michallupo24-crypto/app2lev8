@@ -46,8 +46,11 @@ interface Conversation {
   otherName: string;
   otherAvatar: AvatarConfig | null;
   otherRoleLabel: string;
-  otherChatPresence: string | null;
+  /** בצ'אט פרטי — מזהה הצד השני (למציאת שיחה קיימת ולנראות) */
+  otherUserId: string | null;
   participantCount: number;
+  /** שמות לתצוגה בכותרת קבוצה (סגנון וואטסאפ) */
+  participantPreview: string;
 }
 
 interface Message {
@@ -112,6 +115,13 @@ function avatarFromRow(av: any): AvatarConfig | null {
   };
 }
 
+/** Supabase may return avatars as one row or an array */
+function firstAvatarFromProfile(avatars: unknown): any {
+  if (!avatars) return null;
+  if (Array.isArray(avatars)) return avatars[0] ?? null;
+  return avatars;
+}
+
 /* ─── Component ───────────────────────────────────────── */
 const ChatPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
@@ -131,11 +141,22 @@ const ChatPage = () => {
   const [listFilter, setListFilter] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
   const [myPresence, setMyPresence] = useState<string>("available");
+  const [peerPresence, setPeerPresence] = useState<string | null>(null);
+  const [myClassId, setMyClassId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const realtimeRef = useRef<any>(null);
 
   const canSetPresence = profile.roles.some((r) => STAFF_PRESENCE_ROLES.has(r));
+  const isStudent = profile.roles.includes("student");
+
+  /* ── כיתה שלי (לחיפוש חברים) ─────────────────────────── */
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("profiles").select("class_id").eq("id", profile.id).maybeSingle();
+      setMyClassId(data?.class_id ?? null);
+    })();
+  }, [profile.id]);
 
   /* ── Quiet hours ─────────────────────────────────────── */
   useEffect(() => {
@@ -201,8 +222,9 @@ const ChatPage = () => {
         .order("created_at", { ascending: false })
         .limit(convoIds.length * 3), // enough to get at least 1 per convo
       // All participants for all convos at once
+      // בלי chat_presence כאן — אם העמודה לא קיימת ב-Supabase של Lovable כל השאילתה נופלת (0 משתתפים, "שיחה")
       supabase.from("conversation_participants")
-        .select("conversation_id, user_id, profiles(full_name, chat_presence, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
+        .select("conversation_id, user_id, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
         .in("conversation_id", convoIds),
       // Unread counts in one go
       supabase.from("messages")
@@ -214,6 +236,15 @@ const ChatPage = () => {
     const allMsgs = lastMsgsRes.data || [];
     const allParts = participantsRes.data || [];
     const allMsgTimes = unreadRes.data || [];
+
+    if (participantsRes.error) {
+      console.error("conversation_participants:", participantsRes.error);
+      toast({
+        title: "שגיאה בטעינת השיחות",
+        description: participantsRes.error.message,
+        variant: "destructive",
+      });
+    }
 
     // Build last message map
     const lastMsgMap = new Map<string, typeof allMsgs[0]>();
@@ -247,11 +278,19 @@ const ChatPage = () => {
       const roles = (other?.user_roles || []).map((r: any) => r.role);
       const roleLabel = roles.map((r: string) => ROLE_LABELS[r] || r).join(", ");
       const lastName = otherParts.map((p: any) => (p.profiles as any)?.full_name || "").filter(Boolean).join(", ");
+      const otherUserId = c.type === "private" && other ? (other.user_id as string) : null;
 
-      const otherPresence =
-        c.type === "private" && other?.profiles
-          ? String((other.profiles as { chat_presence?: string }).chat_presence || "available")
-          : null;
+      const participantNames = parts
+        .map((p: any) => (p.profiles as any)?.full_name)
+        .filter(Boolean) as string[];
+      const participantPreview =
+        participantNames.length > 0
+          ? participantNames.slice(0, 8).join(" · ") +
+            (participantNames.length > 8 ? ` · +${participantNames.length - 8}` : "")
+          : "";
+
+      const privateTitle = lastName || c.title || "שיחה";
+      const groupTitle = c.title || lastName || "קבוצה";
 
       return {
         id: c.id,
@@ -266,11 +305,12 @@ const ChatPage = () => {
           ? { content: lastMsgMap.get(c.id)!.content, created_at: lastMsgMap.get(c.id)!.created_at, is_flagged: lastMsgMap.get(c.id)!.is_flagged }
           : undefined,
         unreadCount: unreadMap.get(c.id) || 0,
-        otherName: c.title || lastName || "שיחה",
-        otherAvatar: c.type === "private" ? avatarFromRow(av) : null,
+        otherName: c.type === "private" ? privateTitle : groupTitle,
+        otherAvatar: c.type === "private" ? avatarFromRow(firstAvatarFromProfile((other?.profiles as any)?.avatars)) : null,
         otherRoleLabel: roleLabel,
-        otherChatPresence: otherPresence,
+        otherUserId,
         participantCount: parts.length,
+        participantPreview,
       };
     });
 
@@ -280,6 +320,33 @@ const ChatPage = () => {
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
+  const selectedPrivatePeerId = useMemo(() => {
+    const c = conversations.find((x) => x.id === selectedId);
+    return c?.type === "private" ? c.otherUserId : null;
+  }, [conversations, selectedId]);
+
+  /* ── נראות הצד השני בצ'אט פרטי (עמודה אופציונלית ב-DB) ─ */
+  useEffect(() => {
+    if (!selectedPrivatePeerId) {
+      setPeerPresence(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("chat_presence")
+        .eq("id", selectedPrivatePeerId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data?.chat_presence) setPeerPresence(null);
+      else setPeerPresence(data.chat_presence);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPrivatePeerId]);
+
   /* ── Load messages for selected conversation ──────────── */
   useEffect(() => {
     if (!selectedId) return;
@@ -287,22 +354,45 @@ const ChatPage = () => {
     setMessages([]);
 
     const load = async () => {
-      const { data } = await supabase
+      const { data: msgRows, error: msgErr } = await supabase
         .from("messages")
-        .select("id, sender_id, content, created_at, is_flagged, flag_reason, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color))")
+        .select("id, sender_id, content, created_at, is_flagged, flag_reason")
         .eq("conversation_id", selectedId)
         .order("created_at", { ascending: true });
 
-      setMessages((data || []).map((m: any) => ({
-        id: m.id,
-        sender_id: m.sender_id,
-        sender_name: (m.profiles as any)?.full_name || "?",
-        sender_avatar: avatarFromRow((m.profiles as any)?.avatars?.[0]),
-        content: m.content,
-        created_at: m.created_at,
-        is_flagged: m.is_flagged,
-        flag_reason: m.flag_reason,
-      })));
+      if (msgErr) {
+        toast({ title: "שגיאה בטעינת הודעות", description: msgErr.message, variant: "destructive" });
+        setMessages([]);
+        setLoadingMsgs(false);
+        return;
+      }
+
+      const senderIds = [...new Set((msgRows || []).map((m) => m.sender_id))];
+      const profById = new Map<string, { full_name: string | null; avatars: unknown }>();
+      if (senderIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
+          .in("id", senderIds);
+        for (const p of profs || []) profById.set(p.id, p as { full_name: string | null; avatars: unknown });
+      }
+
+      setMessages(
+        (msgRows || []).map((m) => {
+          const pr = profById.get(m.sender_id);
+          const avRow = firstAvatarFromProfile(pr?.avatars);
+          return {
+            id: m.id,
+            sender_id: m.sender_id,
+            sender_name: (pr?.full_name && pr.full_name.trim()) || "משתמש",
+            sender_avatar: avatarFromRow(avRow),
+            content: m.content,
+            created_at: m.created_at,
+            is_flagged: m.is_flagged,
+            flag_reason: m.flag_reason,
+          };
+        }),
+      );
       setLoadingMsgs(false);
 
       // Mark as read
@@ -328,12 +418,13 @@ const ChatPage = () => {
         const { data: prof } = await supabase
           .from("profiles")
           .select("full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
-          .eq("id", m.sender_id).single();
+          .eq("id", m.sender_id)
+          .maybeSingle();
         const newMsg: Message = {
           id: m.id,
           sender_id: m.sender_id,
-          sender_name: (prof as any)?.full_name || "?",
-          sender_avatar: avatarFromRow((prof as any)?.avatars?.[0]),
+          sender_name: ((prof as any)?.full_name && String((prof as any).full_name).trim()) || "משתמש",
+          sender_avatar: avatarFromRow(firstAvatarFromProfile((prof as any)?.avatars)),
           content: m.content,
           created_at: m.created_at,
           is_flagged: m.is_flagged,
@@ -365,32 +456,34 @@ const ChatPage = () => {
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchUsers([]); return; }
     const timer = setTimeout(async () => {
-      const { data } = await supabase
+      let q = supabase
         .from("profiles")
         .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color), user_roles(role)")
         .eq("is_approved", true)
         .neq("id", profile.id)
-        .ilike("full_name", `%${searchQuery}%`)
-        .limit(10);
-      if (profile.schoolId) {
-        // filter in-memory if school filter not applied
+        .ilike("full_name", `%${searchQuery}%`);
+      if (profile.schoolId) q = q.eq("school_id", profile.schoolId);
+      if (isStudent && myClassId) q = q.eq("class_id", myClassId);
+      const { data, error } = await q.limit(25);
+      if (error) {
+        setSearchUsers([]);
+        return;
       }
       setSearchUsers((data || []).map((u: any) => ({
         user_id: u.id,
         full_name: u.full_name,
-        avatar: avatarFromRow(u.avatars?.[0]),
+        avatar: avatarFromRow(firstAvatarFromProfile(u.avatars)),
         roleLabel: (u.user_roles || []).map((r: any) => ROLE_LABELS[r.role] || r.role).join(", "),
       })));
     }, 280);
     return () => clearTimeout(timer);
-  }, [searchQuery, profile.id, profile.schoolId]);
+  }, [searchQuery, profile.id, profile.schoolId, isStudent, myClassId]);
 
   /* ── Start / find DM ─────────────────────────────────── */
   const startDM = async (user: SearchUser) => {
     // Find existing
-    const existing = conversations.find(c =>
-      c.type === "private" &&
-      c.otherName.includes(user.full_name)
+    const existing = conversations.find(
+      (c) => c.type === "private" && c.otherUserId === user.user_id,
     );
     if (existing) {
       selectConvo(existing.id);
@@ -726,7 +819,13 @@ const ChatPage = () => {
             <div className="relative flex-1">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder={showNewChat ? "חיפוש אנשים..." : "חיפוש ברשימת השיחות..."}
+                placeholder={
+                  showNewChat
+                    ? isStudent
+                      ? "שם פרטי או משפחה (חברי כיתה)..."
+                      : "שם לשיחה חדשה..."
+                    : "חיפוש ברשימת השיחות..."
+                }
                 className="pr-9 h-9 text-sm bg-muted/40 border-0 focus-visible:ring-1"
                 value={showNewChat ? searchQuery : listFilter}
                 onChange={(e) => (showNewChat ? setSearchQuery(e.target.value) : setListFilter(e.target.value))}
@@ -746,15 +845,11 @@ const ChatPage = () => {
           {/* New chat search panel */}
           {showNewChat && (
             <div className="border-b border-border">
-              <div className="p-3">
-                <Input
-                  autoFocus
-                  placeholder="חפש שם לשיחה חדשה..."
-                  className="h-9 text-sm"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                />
-              </div>
+              <p className="px-3 pt-2 pb-1 text-[11px] text-muted-foreground leading-snug">
+                {isStudent && myClassId
+                  ? "חיפוש לפי שם בין חברי הכיתה שלך ובאותו בית ספר."
+                  : "חיפוש לפי שם — מוצגים משתמשים מאושרים באותו בית ספר."}
+              </p>
               {searchUsers.length > 0 && (
                 <div className="max-h-52 overflow-y-auto">
                   {searchUsers.map(u => (
@@ -862,15 +957,26 @@ const ChatPage = () => {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="font-heading font-semibold text-sm truncate">{selectedConvo?.otherName}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {selectedConvo?.type === "private"
-                      ? selectedConvo.otherRoleLabel
-                      : `${selectedConvo?.participantCount} משתתפים`}
-                    {selectedConvo?.type === "private" && selectedConvo.otherChatPresence && (
-                      <span>
-                        {" · "}
-                        {PRESENCE_LABELS[selectedConvo.otherChatPresence] || selectedConvo.otherChatPresence}
-                      </span>
+                  <p className="text-[10px] text-muted-foreground line-clamp-2">
+                    {selectedConvo?.type === "private" ? (
+                      <>
+                        {selectedConvo.otherRoleLabel || "שיחה פרטית"}
+                        {peerPresence && (
+                          <span>
+                            {" · "}
+                            {PRESENCE_LABELS[peerPresence] || peerPresence}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {(selectedConvo?.participantCount ?? 0) === 0
+                          ? "טוען משתתפים…"
+                          : `${selectedConvo?.participantCount} משתתפים`}
+                        {selectedConvo?.participantPreview ? (
+                          <span className="block mt-0.5 opacity-90">{selectedConvo.participantPreview}</span>
+                        ) : null}
+                      </>
                     )}
                     {!selectedConvo?.is_accepted && " • בקשת הודעה"}
                   </p>
