@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +65,7 @@ interface UpcomingEvent {
 
 const ParentDashboardPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   const [children, setChildren] = useState<ChildInfo[]>([]);
@@ -479,10 +480,16 @@ const ParentDashboardPage = () => {
                       {selectedChild.schoolName && <><span>•</span><span>{selectedChild.schoolName}</span></>}
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" className="gap-2 font-heading"
-                    onClick={() => { setMessageDialog(true); setMessageText(""); }}>
-                    <MessageSquare className="h-4 w-4" />שלח הודעה למחנך
-                  </Button>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="default" size="sm" className="gap-2 font-heading"
+                      onClick={() => navigate("/dashboard/timetable")}>
+                      <Calendar className="h-4 w-4" />מערכת שעות
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-2 font-heading"
+                      onClick={() => { setMessageDialog(true); setMessageText(""); }}>
+                      <MessageSquare className="h-4 w-4" />שלח הודעה למחנך
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

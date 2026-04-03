@@ -26,6 +26,7 @@ interface SchoolStat {
   totalClasses: number;
   avgGrade: number | null;
   presentToday: number | null;
+  absentToday: number | null;
   pendingApprovals: number;
 }
 
@@ -122,12 +123,36 @@ const PrincipalDashboardPage = () => {
 
       const overallAvg = avgs.length > 0 ? Math.round(avgs.reduce((s, g) => s + g.avg, 0) / avgs.length) : null;
 
+      // Fetch attendance for today
+      const today = new Date().toISOString().split("T")[0];
+      const { data: attendanceData } = await supabase
+        .from("attendance")
+        .select("status, student_id")
+        .gte("created_at", today);
+
+      const uniqueStudents = new Map<string, string>();
+      (attendanceData || []).forEach((a: any) => {
+        // If they have any "absent", consider them absent (worst case), otherwise present/late is present.
+        const existing = uniqueStudents.get(a.student_id);
+        if (existing !== "absent") {
+          uniqueStudents.set(a.student_id, a.status);
+        }
+      });
+
+      let presentCount = 0;
+      let absentCount = 0;
+      uniqueStudents.forEach(status => {
+        if (status === "present" || status === "late") presentCount++;
+        if (status === "absent") absentCount++;
+      });
+
       setStats({
         totalStudents: studRes.count || 0,
         totalTeachers: teachRes.count || 0,
         totalClasses: classRes.count || 0,
         avgGrade: overallAvg,
-        presentToday: null,
+        presentToday: presentCount,
+        absentToday: absentCount,
         pendingApprovals: approvalRes.count || 0,
       });
       setGradeAvgs(avgs);
@@ -285,9 +310,10 @@ const PrincipalDashboardPage = () => {
           {[
             { label: "תלמידים", val: stats.totalStudents, icon: Users, color: "text-primary" },
             { label: "מורים", val: stats.totalTeachers, icon: BookOpen, color: "text-green-600" },
-            { label: "כיתות", val: stats.totalClasses, icon: Building2, color: "text-purple-600" },
+            { label: "נוכחים היום", val: stats.presentToday || 0, icon: UserCheck, color: "text-blue-600" },
+            { label: "חיסורים היום", val: stats.absentToday || 0, icon: AlertTriangle, color: (stats.absentToday || 0) > 0 ? "text-destructive" : "text-muted-foreground" },
             { label: "ממוצע בי\"ס", val: stats.avgGrade ?? "—", icon: BarChart3, color: stats.avgGrade ? (stats.avgGrade >= 75 ? "text-green-600" : "text-yellow-600") : "text-muted-foreground" },
-            { label: "ממתינים לאישור", val: stats.pendingApprovals, icon: UserCheck, color: stats.pendingApprovals > 0 ? "text-destructive" : "text-green-600" },
+            { label: "ממתינים", val: stats.pendingApprovals, icon: UserCheck, color: stats.pendingApprovals > 0 ? "text-destructive" : "text-muted-foreground" },
           ].map((s, i) => (
             <Card key={i} className={s.label === "ממתינים לאישור" && stats.pendingApprovals > 0 ? "border-destructive/30" : ""}>
               <CardContent className="py-4 text-center">

@@ -21,6 +21,7 @@ interface GradeStats {
   scheduledMeetings: number;
   announcements: number;
   avgAttendance: number;
+  absentToday: number;
 }
 
 const GradeCoordinatorDashboard = () => {
@@ -29,7 +30,7 @@ const GradeCoordinatorDashboard = () => {
   const [stats, setStats] = useState<GradeStats>({
     totalClasses: 0, totalStudents: 0, pendingEvents: 0,
     upcomingExams: 0, activeTutoring: 0, scheduledMeetings: 0,
-    announcements: 0, avgAttendance: 0,
+    announcements: 0, avgAttendance: 0, absentToday: 0,
   });
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
@@ -78,6 +79,27 @@ const GradeCoordinatorDashboard = () => {
       const pendingEvents = events.filter((e: any) => e.status === "proposed").length;
       const upcomingExams = events.filter((e: any) => e.event_type === "exam" && e.status === "approved").length;
 
+      let absentCount = 0;
+      if (classIds.length > 0) {
+        const today = new Date().toISOString().split("T")[0];
+        const { data: attData } = await supabase.from("attendance")
+          .select("student_id, status")
+          .gte("created_at", today)
+          .eq("status", "absent");
+
+        // Filter students belonging to this grade
+        if (attData && attData.length > 0) {
+          const { data: validStudents } = await supabase.from("profiles")
+            .select("id")
+            .in("class_id", classIds)
+            .in("id", attData.map((a: any) => a.student_id));
+            
+          const validSet = new Set((validStudents || []).map((v: any) => v.id));
+          const uniqueAbsents = new Set(attData.filter((a: any) => validSet.has(a.student_id)).map((a: any) => a.student_id));
+          absentCount = uniqueAbsents.size;
+        }
+      }
+
       setStats({
         totalClasses: classIds.length,
         totalStudents: studentCount,
@@ -87,6 +109,7 @@ const GradeCoordinatorDashboard = () => {
         scheduledMeetings: meetingsRes.count || 0,
         announcements: announcementsRes.count || 0,
         avgAttendance: 0,
+        absentToday: absentCount,
       });
     };
     load();
@@ -163,12 +186,13 @@ const GradeCoordinatorDashboard = () => {
       )}
 
       {/* Stats Grid */}
-      <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { icon: BookOpen, label: "כיתות בשכבה", value: stats.totalClasses, color: "text-primary" },
           { icon: GraduationCap, label: "תלמידים", value: stats.totalStudents, color: "text-info" },
+          { icon: AlertTriangle, label: "חיסורים היום", value: stats.absentToday, color: stats.absentToday > 0 ? "text-destructive" : "text-muted-foreground" },
           { icon: Calendar, label: "מבחנים קרובים", value: stats.upcomingExams, color: "text-warning" },
-          { icon: AlertTriangle, label: "אירועים ממתינים", value: stats.pendingEvents, color: "text-destructive" },
+          { icon: Clock, label: "אירועים ממתינים", value: stats.pendingEvents, color: "text-orange-500" },
         ].map((s, i) => (
           <Card key={i}>
             <CardContent className="py-4 text-center">

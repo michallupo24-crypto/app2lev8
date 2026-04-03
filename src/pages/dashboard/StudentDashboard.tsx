@@ -80,6 +80,7 @@ const StudentDashboard = () => {
   const [aiInsight, setAiInsight] = useState<string>("");
   const [aiLoading, setAiLoading] = useState(false);
   const [isBirthday, setIsBirthday] = useState(false);
+  const [attendance, setAttendance] = useState<{ total: number; absent: number; late: number; pct: number } | null>(null);
   const { subjects: mySubjects, trackNames, hasMegamaA, hasMegamaB } = useStudentSubjects(profile.id, profile.schoolId);
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.08 } } };
@@ -137,6 +138,19 @@ const StudentDashboard = () => {
         .eq("status", "approved")
         .order("event_date", { ascending: true });
       setGradeEvents(filterEventsBySubjects(events || [], mySubjects, hasMegamaA, hasMegamaB));
+    })();
+
+    // Fetch attendance
+    (async () => {
+      const { data } = await supabase.from("attendance")
+        .select("status")
+        .eq("student_id", profile.id);
+      if (data && data.length > 0) {
+        const total = data.length;
+        const absent = data.filter(r => r.status === "absent").length;
+        const late = data.filter(r => r.status === "late").length;
+        setAttendance({ total, absent, late, pct: Math.round((absent/total)*100) });
+      }
     })();
   }, [profile.id, profile.schoolId, mySubjects, hasMegamaA, hasMegamaB]);
 
@@ -434,6 +448,30 @@ ${birthdayText}
                     <p className="text-[10px] font-black text-destructive uppercase tracking-widest mb-1">המבחן הקרוב</p>
                     <h3 className="font-heading font-black text-sm mb-2">{personalizeEventTitle(nextExam.title, nextExam.subject, trackNames)}</h3>
                     <Badge className="bg-destructive text-white border-none text-xl py-2 px-4 shadow-lg"> בעוד {dayDiff(today, parseDate(nextExam.event_date))} ימים </Badge>
+                  </CardContent>
+               </Card>
+            </motion.div>
+          )}
+
+          {/* Attendance Sidebar Widget */}
+          {attendance && (
+            <motion.div variants={item}>
+               <Card className={`border-${attendance.pct >= 15 ? 'destructive' : attendance.pct >= 10 ? 'warning' : 'primary'}/20`}>
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-muted-foreground mb-1">מצב נוכחות קולל</p>
+                      <div className="flex gap-2 text-sm font-heading">
+                        <span className="text-destructive font-bold">{attendance.absent} חיסורים</span>
+                        <span className="text-warning">{attendance.late} איחורים</span>
+                      </div>
+                    </div>
+                    <div className={`w-12 h-12 rounded-full border-4 flex items-center justify-center font-bold font-heading text-sm shadow-inner ${
+                      attendance.pct >= 15 ? "border-destructive text-destructive bg-destructive/10" : 
+                      attendance.pct >= 10 ? "border-warning text-warning bg-warning/10" : 
+                      "border-success text-success bg-success/10"
+                    }`}>
+                      {attendance.pct}%
+                    </div>
                   </CardContent>
                </Card>
             </motion.div>
