@@ -409,7 +409,7 @@ ${birthdayText}
                 { icon: Trophy, label: "הישגים", path: "/dashboard/badges", color: "text-yellow-500", bg: "bg-yellow-50" },
                 { icon: BookOpen, label: "מקצועות", path: "/dashboard/subjects", color: "text-blue-500", bg: "bg-blue-50" },
                 { icon: Target, label: "משימות", path: "/dashboard/tasks", color: "text-orange-500", bg: "bg-orange-50" },
-                { icon: Brain, label: "מנטור AI", path: "/dashboard/ai-tutor", color: "text-indigo-500", bg: "bg-indigo-50" },
+                { icon: Brain, label: "C.H.E.E.S.E.", path: "/dashboard/ai-tutor", color: "text-indigo-500", bg: "bg-indigo-50" },
               ].map((quickItem, i) => (
                 <Card 
                   key={i} 
