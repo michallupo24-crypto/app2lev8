@@ -117,26 +117,36 @@ const MasterSchedulerPage = () => {
       return;
     }
 
-    // Get coordinator's grade or subject
-    const { data: roleData } = await supabase
+    // Get coordinator's roles
+    const { data: roles } = await supabase
       .from("user_roles").select("grade, subject, role")
       .eq("user_id", profile.id)
-      .in("role", ["grade_coordinator", "subject_coordinator"])
-      .maybeSingle();
+      .in("role", ["grade_coordinator", "subject_coordinator", "management", "system_admin"]);
 
-    if (!roleData) {
-      toast({ title: "שגיאה", description: "לא נמצאה הרשאת רכז (שכבה או מקצוע)", variant: "destructive" });
+    if (!roles || roles.length === 0) {
+      toast({ title: "שגיאה", description: "לא נמצאה הרשאת רכז רלוונטית", variant: "destructive" });
       return;
     }
 
-    if (roleData.role === "subject_coordinator" && form.event_type === "exam" && form.subject !== roleData.subject) {
-      toast({ title: "שגיאה", description: `רכז/ת ${roleData.subject} יכול/ה להוסיף מבחנים רק במקצוע המשויך`, variant: "destructive" });
+    const isGradeCoord = roles.find(r => r.role === "grade_coordinator");
+    const isSubjCoord = roles.find(r => r.role === "subject_coordinator");
+    const isAdmin = roles.find(r => ["management", "system_admin"].includes(r.role));
+
+    // Validation for subject coordinator
+    if (isSubjCoord && !isGradeCoord && !isAdmin && form.event_type === "exam" && form.subject !== isSubjCoord.subject) {
+      toast({ title: "שגיאה", description: `רכז/ת ${isSubjCoord.subject} יכול/ה להוסיף מבחנים רק במקצוע המשויך`, variant: "destructive" });
+      return;
+    }
+
+    const determinedGrade = isGradeCoord?.grade || form.grade;
+    if (!determinedGrade) {
+      toast({ title: "שגיאה", description: "אנא בחר שכבת גיל לאירוע", variant: "destructive" });
       return;
     }
 
     const { error } = await supabase.from("grade_events").insert({
       school_id: profile.schoolId!,
-      grade: roleData.grade || form.grade, // Use form.grade if coordinator grade is not set
+      grade: determinedGrade,
       title: form.title,
       description: form.description || null,
       event_type: form.event_type,

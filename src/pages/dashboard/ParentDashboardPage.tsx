@@ -189,12 +189,12 @@ const ParentDashboardPage = () => {
       // 1. Grades
       const { data: subs } = await supabase
         .from("submissions")
-        .select("grade, graded_at, assignments(title, subject, max_grade, class_id)")
+        .select("grade, graded_at, assignments(id, title, subject, max_grade, class_id)")
         .eq("student_id", selectedChild.id)
         .eq("status", "graded")
         .not("grade", "is", null)
         .order("graded_at", { ascending: false })
-        .limit(20);
+        .limit(30);
 
       // 2. Class averages per assignment (using RPC)
       const assignmentIds = (subs || []).map((s: any) => s.assignments?.id).filter(Boolean);
