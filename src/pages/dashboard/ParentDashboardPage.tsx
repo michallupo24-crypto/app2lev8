@@ -20,13 +20,14 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell,
 } from "recharts";
+import { getStudentGrades, SubjectGradeReport } from "@/utils/gradingEngine";
 
 interface ChildInfo {
   id: string;
-  fullName: string;
   grade: string | null;
   classNumber: number | null;
   schoolName: string | null;
+  schoolId: string | null;
   isApproved: boolean;
 }
 
@@ -75,6 +76,7 @@ const ParentDashboardPage = () => {
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
   const [attendance, setAttendance] = useState<AttendanceStat | null>(null);
   const [recentGrades, setRecentGrades] = useState<GradeEntry[]>([]);
+  const [subjectGrades, setSubjectGrades] = useState<SubjectGradeReport[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [pendingTasks, setPendingTasks] = useState(0);
   const [childLoading, setChildLoading] = useState(false);
@@ -112,6 +114,7 @@ const ParentDashboardPage = () => {
         grade: p.classes?.grade || null,
         classNumber: p.classes?.class_number || null,
         schoolName: p.schools?.name || null,
+        schoolId: p.school_id || null,
         isApproved: p.is_approved,
       }));
       setChildren(kids);
@@ -248,6 +251,12 @@ const ParentDashboardPage = () => {
         }
         stats.push({ subject: subj, avg, count: grades.length, classAvg: null, trend });
       });
+
+      // MoE Grading Rules Integration
+      if (selectedChild.schoolId) {
+        const fullGrades = await getStudentGrades(selectedChild.id, selectedChild.schoolId, 1);
+        setSubjectGrades(fullGrades);
+      }
       setSubjectStats(stats.sort((a, b) => b.avg - a.avg));
 
       // 3. Attendance

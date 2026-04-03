@@ -38,6 +38,7 @@ const TeacherDashboard = () => {
   const [stats, setStats] = useState<TeacherStats>({ totalStudents: 0, classCount: 0, pendingSubmissions: 0, todayLessons: 0 });
   const [myClasses, setMyClasses] = useState<{id: string, name: string}[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [missingWeightsCount, setMissingWeightsCount] = useState(0);
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.1 } } };
   const item = { hidden: { opacity: 0, y: 15 }, show: { opacity: 1, y: 0 } };
@@ -73,6 +74,14 @@ const TeacherDashboard = () => {
         pendingSubmissions: submissionsRes.count || 0,
         todayLessons: 0,
       });
+
+      if (profile.roles?.includes("subject_coordinator")) {
+        const { count: missing } = await supabase.from("grade_events")
+          .select("id", { count: "exact", head: true })
+          .eq("event_type", "exam")
+          .is("weight", null);
+        setMissingWeightsCount(missing || 0);
+      }
     };
     load();
   }, [profile.id]);
@@ -105,6 +114,26 @@ const TeacherDashboard = () => {
            </Button>
         </div>
       </div>
+
+      {/* ─── MISSING EXAM WEIGHTS ALERT ─── */}
+      {profile.roles?.includes("subject_coordinator") && missingWeightsCount > 0 && (
+        <motion.div variants={item}>
+          <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <div>
+                <p className="font-heading font-bold text-destructive">התראת רכז מקצוע: אחוזי ציונים חסרים!</p>
+                <p className="text-sm text-destructive/80">
+                  ישנם {missingWeightsCount} מבחנים שתוכננו בלוח המבחנים וטרם הזנת להם אחוז שקלול. לא נוכל לחשב ציונים סופיים בלעדיהם!
+                </p>
+              </div>
+            </div>
+            <Button variant="destructive" size="sm" onClick={() => navigate("/dashboard/schedule")}>
+              הזן אחוזים כעת
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
       {/* ─── PENDING APPROVALS ALERT ─── */}
       {profile.pendingApprovalsCount > 0 && (
