@@ -122,6 +122,23 @@ function firstAvatarFromProfile(avatars: unknown): any {
   return avatars;
 }
 
+/** avatars.user_id → auth.users; אין FK ל-profiles — לא משתמשים ב-embed של PostgREST */
+async function fetchAvatarsByUserIds(userIds: string[]) {
+  const map = new Map<string, Record<string, unknown>>();
+  const uniq = [...new Set(userIds)].filter(Boolean);
+  if (!uniq.length) return map;
+  const { data, error } = await supabase
+    .from("avatars")
+    .select("user_id, face_shape, eye_color, skin_color, hair_style, hair_color")
+    .in("user_id", uniq);
+  if (error) {
+    console.error("avatars (batch):", error);
+    return map;
+  }
+  for (const row of data || []) map.set(row.user_id as string, row as Record<string, unknown>);
+  return map;
+}
+
 /* ─── Component ───────────────────────────────────────── */
 const ChatPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
@@ -142,21 +159,10 @@ const ChatPage = () => {
   const [showNewChat, setShowNewChat] = useState(false);
   const [myPresence, setMyPresence] = useState<string>("available");
   const [peerPresence, setPeerPresence] = useState<string | null>(null);
-  const [myClassId, setMyClassId] = useState<string | null>(null);
-
   const bottomRef = useRef<HTMLDivElement>(null);
   const realtimeRef = useRef<any>(null);
 
   const canSetPresence = profile.roles.some((r) => STAFF_PRESENCE_ROLES.has(r));
-  const isStudent = profile.roles.includes("student");
-
-  /* ── כיתה שלי (לחיפוש חברים) ─────────────────────────── */
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("profiles").select("class_id").eq("id", profile.id).maybeSingle();
-      setMyClassId(data?.class_id ?? null);
-    })();
-  }, [profile.id]);
 
   /* ── Quiet hours ─────────────────────────────────────── */
   useEffect(() => {
@@ -251,16 +257,19 @@ const ChatPage = () => {
     const rolesByUser = new Map<string, { role: string }[]>();
 
     if (participantUserIds.length > 0) {
-      const [profRes, rolesRes] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
-          .in("id", participantUserIds),
+      const [profRes, rolesRes, avatarMap] = await Promise.all([
+        supabase.from("profiles").select("id, full_name").in("id", participantUserIds),
         supabase.from("user_roles").select("user_id, role").in("user_id", participantUserIds),
+        fetchAvatarsByUserIds(participantUserIds),
       ]);
       if (profRes.error) console.error("profiles (chat participants):", profRes.error);
       if (rolesRes.error) console.error("user_roles (chat participants):", rolesRes.error);
-      for (const p of profRes.data || []) profileMap.set(p.id, p as { full_name: string | null; avatars: unknown });
+      for (const p of profRes.data || []) {
+        profileMap.set(p.id, {
+          full_name: p.full_name,
+          avatars: avatarMap.get(p.id) ?? null,
+        });
+      }
       for (const r of rolesRes.data || []) {
         const list = rolesByUser.get(r.user_id) || [];
         list.push({ role: r.role as string });
@@ -398,11 +407,17 @@ const ChatPage = () => {
       const senderIds = [...new Set((msgRows || []).map((m) => m.sender_id))];
       const profById = new Map<string, { full_name: string | null; avatars: unknown }>();
       if (senderIds.length > 0) {
-        const { data: profs } = await supabase
-          .from("profiles")
-          .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
-          .in("id", senderIds);
-        for (const p of profs || []) profById.set(p.id, p as { full_name: string | null; avatars: unknown });
+        const [profRes, avatarMap] = await Promise.all([
+          supabase.from("profiles").select("id, full_name").in("id", senderIds),
+          fetchAvatarsByUserIds(senderIds),
+        ]);
+        if (profRes.error) console.error("profiles (messages):", profRes.error);
+        for (const p of profRes.data || []) {
+          profById.set(p.id, {
+            full_name: p.full_name,
+            avatars: avatarMap.get(p.id) ?? null,
+          });
+        }
       }
 
       setMessages(
@@ -445,14 +460,16 @@ const ChatPage = () => {
         // Fetch sender info
         const { data: prof } = await supabase
           .from("profiles")
-          .select("full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
+          .select("full_name")
           .eq("id", m.sender_id)
           .maybeSingle();
+        const avMap = await fetchAvatarsByUserIds([m.sender_id]);
+        const avRow = avMap.get(m.sender_id);
         const newMsg: Message = {
           id: m.id,
           sender_id: m.sender_id,
           sender_name: ((prof as any)?.full_name && String((prof as any).full_name).trim()) || "משתמש",
-          sender_avatar: avatarFromRow(firstAvatarFromProfile((prof as any)?.avatars)),
+          sender_avatar: avatarFromRow(avRow ?? null),
           content: m.content,
           created_at: m.created_at,
           is_flagged: m.is_flagged,
@@ -484,16 +501,18 @@ const ChatPage = () => {
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchUsers([]); return; }
     const timer = setTimeout(async () => {
+      const term = searchQuery.trim();
       let q = supabase
         .from("profiles")
-        .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
+        .select("id, full_name")
         .eq("is_approved", true)
         .neq("id", profile.id)
-        .ilike("full_name", `%${searchQuery}%`);
+        .ilike("full_name", `%${term}%`);
       if (profile.schoolId) q = q.eq("school_id", profile.schoolId);
-      if (isStudent && myClassId) q = q.eq("class_id", myClassId);
       const { data: profs, error } = await q.limit(25);
       if (error) {
+        console.error("chat search profiles:", error);
+        toast({ title: "חיפוש", description: error.message, variant: "destructive" });
         setSearchUsers([]);
         return;
       }
@@ -502,23 +521,26 @@ const ChatPage = () => {
         return;
       }
       const searchIds = profs.map((p) => p.id);
-      const { data: roleRows } = await supabase.from("user_roles").select("user_id, role").in("user_id", searchIds);
+      const [{ data: roleRows }, avatarMap] = await Promise.all([
+        supabase.from("user_roles").select("user_id, role").in("user_id", searchIds),
+        fetchAvatarsByUserIds(searchIds),
+      ]);
       const roleLabelByUser = new Map<string, string>();
       for (const row of roleRows || []) {
         const label = ROLE_LABELS[row.role as string] || row.role;
         roleLabelByUser.set(row.user_id, [roleLabelByUser.get(row.user_id), label].filter(Boolean).join(", "));
       }
       setSearchUsers(
-        profs.map((u: any) => ({
+        profs.map((u: { id: string; full_name: string }) => ({
           user_id: u.id,
           full_name: u.full_name,
-          avatar: avatarFromRow(firstAvatarFromProfile(u.avatars)),
+          avatar: avatarFromRow(avatarMap.get(u.id) ?? null),
           roleLabel: roleLabelByUser.get(u.id) || "",
         })),
       );
     }, 280);
     return () => clearTimeout(timer);
-  }, [searchQuery, profile.id, profile.schoolId, isStudent, myClassId]);
+  }, [searchQuery, profile.id, profile.schoolId]);
 
   /* ── Start / find DM ─────────────────────────────────── */
   const startDM = async (user: SearchUser) => {
@@ -861,11 +883,7 @@ const ChatPage = () => {
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={
-                  showNewChat
-                    ? isStudent
-                      ? "שם פרטי או משפחה (חברי כיתה)..."
-                      : "שם לשיחה חדשה..."
-                    : "חיפוש ברשימת השיחות..."
+                  showNewChat ? "שם פרטי או משפחה באותו בית ספר..." : "חיפוש ברשימת השיחות..."
                 }
                 className="pr-9 h-9 text-sm bg-muted/40 border-0 focus-visible:ring-1"
                 value={showNewChat ? searchQuery : listFilter}
@@ -887,9 +905,7 @@ const ChatPage = () => {
           {showNewChat && (
             <div className="border-b border-border">
               <p className="px-3 pt-2 pb-1 text-[11px] text-muted-foreground leading-snug">
-                {isStudent && myClassId
-                  ? "חיפוש לפי שם בין חברי הכיתה שלך ובאותו בית ספר."
-                  : "חיפוש לפי שם — מוצגים משתמשים מאושרים באותו בית ספר."}
+                חיפוש לפי שם — משתמשים מאושרים באותו בית ספר. אם אין תוצאות, ייתכן שחברים עדיין לא אושרו או שאין להם שם מלא בפרופיל.
               </p>
               {searchUsers.length > 0 && (
                 <div className="max-h-52 overflow-y-auto">
@@ -911,8 +927,10 @@ const ChatPage = () => {
                   ))}
                 </div>
               )}
-              {searchQuery.length > 1 && searchUsers.length === 0 && (
-                <p className="text-center text-xs text-muted-foreground py-4">לא נמצאו משתמשים</p>
+              {searchQuery.trim().length >= 1 && searchUsers.length === 0 && (
+                <p className="text-center text-xs text-muted-foreground py-4 px-2">
+                  לא נמצאו משתמשים לפי החיפוש
+                </p>
               )}
             </div>
           )}
@@ -1042,7 +1060,10 @@ const ChatPage = () => {
                     {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === profile.id;
                       const prevMsg = messages[idx - 1];
-                      const showSender = !isMe && prevMsg?.sender_id !== msg.sender_id;
+                      const isGroupChat = Boolean(selectedConvo && selectedConvo.type !== "private");
+                      /* בקבוצה: תמיד מציגים מי שלח. בפרטי: רק בתחילת רצף מאותו צד (כמו וואטסאפ) */
+                      const showPeerHeader =
+                        !isMe && (isGroupChat || prevMsg?.sender_id !== msg.sender_id);
                       const showDate = idx === 0 || new Date(msg.created_at).toDateString() !== new Date(messages[idx - 1].created_at).toDateString();
 
                       return (
@@ -1056,17 +1077,28 @@ const ChatPage = () => {
                           )}
                           <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""} ${idx > 0 && messages[idx - 1].sender_id === msg.sender_id ? "mt-0.5" : "mt-2"}`}>
                             {!isMe && (
-                              <div className="w-7 h-7 shrink-0 mt-auto">
-                                {showSender && msg.sender_avatar ? (
-                                  <AvatarPreview config={msg.sender_avatar} size={28} />
+                              <div className="w-8 h-8 shrink-0 mt-auto">
+                                {showPeerHeader ? (
+                                  msg.sender_avatar ? (
+                                    <AvatarPreview config={msg.sender_avatar} size={32} />
+                                  ) : (
+                                    <div
+                                      className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-heading font-semibold text-muted-foreground border border-border/60"
+                                      title={msg.sender_name}
+                                    >
+                                      {(msg.sender_name || "?").trim().charAt(0) || "?"}
+                                    </div>
+                                  )
                                 ) : (
-                                  <div className="w-7 h-7" /> // spacer
+                                  <div className="w-8 h-8" aria-hidden />
                                 )}
                               </div>
                             )}
                             <div className={`max-w-[72%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
-                              {showSender && !isMe && (
-                                <p className="text-[10px] text-muted-foreground mb-0.5 px-1">{msg.sender_name}</p>
+                              {showPeerHeader && (
+                                <p className="text-[11px] font-medium text-foreground/90 mb-0.5 px-1 leading-tight">
+                                  {msg.sender_name}
+                                </p>
                               )}
                               <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed
                                 ${isMe
