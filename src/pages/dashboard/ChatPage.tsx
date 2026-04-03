@@ -213,20 +213,16 @@ const ChatPage = () => {
       myParts.map((p: any) => [p.conversation_id, p.last_read_at])
     );
 
-    // 2. Fetch conversations + last message in ONE query each
-    const [convosRes, lastMsgsRes, participantsRes, unreadRes] = await Promise.all([
+    // 2. Fetch conversations + messages + participant rows (ללא embed — אין FK מ-user_id ל-profiles ב-PostgREST)
+    const [convosRes, lastMsgsRes, participantsRawRes, unreadRes] = await Promise.all([
       supabase.from("conversations").select("*").in("id", convoIds).order("updated_at", { ascending: false }),
-      // Last message per conversation — use a view or just fetch all recent and pick
       supabase.from("messages").select("conversation_id, content, created_at, is_flagged")
         .in("conversation_id", convoIds)
         .order("created_at", { ascending: false })
-        .limit(convoIds.length * 3), // enough to get at least 1 per convo
-      // All participants for all convos at once
-      // בלי chat_presence כאן — אם העמודה לא קיימת ב-Supabase של Lovable כל השאילתה נופלת (0 משתתפים, "שיחה")
+        .limit(convoIds.length * 3),
       supabase.from("conversation_participants")
-        .select("conversation_id, user_id, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
+        .select("conversation_id, user_id")
         .in("conversation_id", convoIds),
-      // Unread counts in one go
       supabase.from("messages")
         .select("conversation_id, created_at")
         .in("conversation_id", convoIds),
@@ -234,17 +230,50 @@ const ChatPage = () => {
 
     const convos = convosRes.data || [];
     const allMsgs = lastMsgsRes.data || [];
-    const allParts = participantsRes.data || [];
     const allMsgTimes = unreadRes.data || [];
 
-    if (participantsRes.error) {
-      console.error("conversation_participants:", participantsRes.error);
+    if (participantsRawRes.error) {
+      console.error("conversation_participants:", participantsRawRes.error);
       toast({
         title: "שגיאה בטעינת השיחות",
-        description: participantsRes.error.message,
+        description: participantsRawRes.error.message,
         variant: "destructive",
       });
+      setConversations([]);
+      setLoadingConvos(false);
+      return;
     }
+
+    const participantsRaw = participantsRawRes.data || [];
+    const participantUserIds = [...new Set(participantsRaw.map((p: { user_id: string }) => p.user_id))];
+
+    const profileMap = new Map<string, { full_name: string | null; avatars: unknown }>();
+    const rolesByUser = new Map<string, { role: string }[]>();
+
+    if (participantUserIds.length > 0) {
+      const [profRes, rolesRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
+          .in("id", participantUserIds),
+        supabase.from("user_roles").select("user_id, role").in("user_id", participantUserIds),
+      ]);
+      if (profRes.error) console.error("profiles (chat participants):", profRes.error);
+      if (rolesRes.error) console.error("user_roles (chat participants):", rolesRes.error);
+      for (const p of profRes.data || []) profileMap.set(p.id, p as { full_name: string | null; avatars: unknown });
+      for (const r of rolesRes.data || []) {
+        const list = rolesByUser.get(r.user_id) || [];
+        list.push({ role: r.role as string });
+        rolesByUser.set(r.user_id, list);
+      }
+    }
+
+    const allParts = participantsRaw.map((row: { conversation_id: string; user_id: string }) => ({
+      conversation_id: row.conversation_id,
+      user_id: row.user_id,
+      profiles: profileMap.get(row.user_id) ?? null,
+      user_roles: rolesByUser.get(row.user_id) || [],
+    }));
 
     // Build last message map
     const lastMsgMap = new Map<string, typeof allMsgs[0]>();
@@ -274,7 +303,6 @@ const ChatPage = () => {
       const parts = partsByConvo.get(c.id) || [];
       const otherParts = parts.filter((p: any) => p.user_id !== profile.id);
       const other = otherParts[0];
-      const av = (other?.profiles as any)?.avatars?.[0];
       const roles = (other?.user_roles || []).map((r: any) => r.role);
       const roleLabel = roles.map((r: string) => ROLE_LABELS[r] || r).join(", ");
       const lastName = otherParts.map((p: any) => (p.profiles as any)?.full_name || "").filter(Boolean).join(", ");
@@ -458,23 +486,36 @@ const ChatPage = () => {
     const timer = setTimeout(async () => {
       let q = supabase
         .from("profiles")
-        .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color), user_roles(role)")
+        .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
         .eq("is_approved", true)
         .neq("id", profile.id)
         .ilike("full_name", `%${searchQuery}%`);
       if (profile.schoolId) q = q.eq("school_id", profile.schoolId);
       if (isStudent && myClassId) q = q.eq("class_id", myClassId);
-      const { data, error } = await q.limit(25);
+      const { data: profs, error } = await q.limit(25);
       if (error) {
         setSearchUsers([]);
         return;
       }
-      setSearchUsers((data || []).map((u: any) => ({
-        user_id: u.id,
-        full_name: u.full_name,
-        avatar: avatarFromRow(firstAvatarFromProfile(u.avatars)),
-        roleLabel: (u.user_roles || []).map((r: any) => ROLE_LABELS[r.role] || r.role).join(", "),
-      })));
+      if (!profs?.length) {
+        setSearchUsers([]);
+        return;
+      }
+      const searchIds = profs.map((p) => p.id);
+      const { data: roleRows } = await supabase.from("user_roles").select("user_id, role").in("user_id", searchIds);
+      const roleLabelByUser = new Map<string, string>();
+      for (const row of roleRows || []) {
+        const label = ROLE_LABELS[row.role as string] || row.role;
+        roleLabelByUser.set(row.user_id, [roleLabelByUser.get(row.user_id), label].filter(Boolean).join(", "));
+      }
+      setSearchUsers(
+        profs.map((u: any) => ({
+          user_id: u.id,
+          full_name: u.full_name,
+          avatar: avatarFromRow(firstAvatarFromProfile(u.avatars)),
+          roleLabel: roleLabelByUser.get(u.id) || "",
+        })),
+      );
     }, 280);
     return () => clearTimeout(timer);
   }, [searchQuery, profile.id, profile.schoolId, isStudent, myClassId]);
