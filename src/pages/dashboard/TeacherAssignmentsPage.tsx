@@ -44,6 +44,22 @@ const TeacherAssignmentsPage = () => {
   const [newAllowLate, setNewAllowLate] = useState(false);
   const [newAllowRevision, setNewAllowRevision] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [remainingWeight, setRemainingWeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!newClassId || !newSubject) return;
+    const loadRem = async () => {
+      const { data } = await supabase
+        .from("assignments")
+        .select("weight_percent")
+        .eq("class_id", newClassId)
+        .eq("subject", newSubject)
+        .eq("published", true);
+      const total = (data || []).reduce((sum, a) => sum + (a.weight_percent || 0), 0);
+      setRemainingWeight(100 - total);
+    };
+    loadRem();
+  }, [newClassId, newSubject, assignments]);
 
   useEffect(() => {
     const loadClasses = async () => {
@@ -174,8 +190,20 @@ const TeacherAssignmentsPage = () => {
                   <Input type="date" value={newDueDate} onChange={e => setNewDueDate(e.target.value)} dir="ltr" />
                 </div>
                 <div className="space-y-1">
-                  <Label className="font-heading text-xs">משקל בציון (%)</Label>
+                  <div className="flex justify-between items-center">
+                    <Label className="font-heading text-xs">משקל בציון (%)</Label>
+                    {remainingWeight !== null && (
+                      <span className={`text-[10px] font-bold ${remainingWeight < parseInt(newWeight) ? "text-destructive" : "text-success"}`}>
+                        נותר: {remainingWeight}%
+                      </span>
+                    )}
+                  </div>
                   <Input type="number" value={newWeight} onChange={e => setNewWeight(e.target.value)} min="0" max="100" dir="ltr" />
+                  {remainingWeight !== null && remainingWeight < parseInt(newWeight) && (
+                    <p className="text-[9px] text-destructive italic font-medium flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" /> חריגה מסך 100% למקצוע זה
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-6">

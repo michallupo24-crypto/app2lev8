@@ -48,6 +48,7 @@ import SchoolOrgTreePage from "./pages/dashboard/SchoolOrgTreePage";
 import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
 import SchedulePage from "./pages/dashboard/SchedulePage";
 import CommunityPage from "./pages/dashboard/CommunityPage";
+import StudentAttendancePage from "./pages/dashboard/StudentAttendancePage";
 
 const queryClient = new QueryClient();
 
@@ -91,7 +92,7 @@ const App = () => (
             <Route path="live-student" element={<StudentLiveLessonPage />} />
             <Route path="rights" element={<StudentRightsPage />} />
             <Route path="game/snakes/:assignmentId" element={<SnakesLaddersGamePage />} />
-            <Route path="attendance" element={<PlaceholderPage title="נוכחות" description="דוח נוכחות והצדקת חיסורים" icon="📋" />} />
+            <Route path="attendance" element={<StudentAttendancePage />} />
             {/* Teacher routes */}
             <Route path="teacher-home" element={<TeacherDashboard />} />
             <Route path="roll-call" element={<RollCallPage />} />

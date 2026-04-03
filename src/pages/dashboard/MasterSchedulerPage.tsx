@@ -27,6 +27,7 @@ interface GradeEvent {
   status: string;
   requires_parent_approval: boolean;
   notes: string | null;
+  weight?: number | null;
   created_at: string;
 }
 
@@ -61,6 +62,7 @@ const MasterSchedulerPage = () => {
     title: "", description: "", event_type: "exam", subject: "",
     event_date: "", start_time: "", end_time: "",
     requires_parent_approval: false, notes: "",
+    weight: "20",
   });
 
   const loadEvents = async () => {
@@ -114,19 +116,26 @@ const MasterSchedulerPage = () => {
       return;
     }
 
-    // Get coordinator's grade
+    // Get coordinator's grade or subject
     const { data: roleData } = await supabase
-      .from("user_roles").select("grade")
-      .eq("user_id", profile.id).eq("role", "grade_coordinator").maybeSingle();
+      .from("user_roles").select("grade, subject, role")
+      .eq("user_id", profile.id)
+      .in("role", ["grade_coordinator", "subject_coordinator"])
+      .maybeSingle();
 
-    if (!roleData?.grade) {
-      toast({ title: "שגיאה", description: "לא נמצאה שכבה משויכת", variant: "destructive" });
+    if (!roleData) {
+      toast({ title: "שגיאה", description: "לא נמצאה הרשאת רכז (שכבה או מקצוע)", variant: "destructive" });
+      return;
+    }
+
+    if (roleData.role === "subject_coordinator" && form.event_type === "exam" && form.subject !== roleData.subject) {
+      toast({ title: "שגיאה", description: `רכז/ת ${roleData.subject} יכול/ה להוסיף מבחנים רק במקצוע המשויך`, variant: "destructive" });
       return;
     }
 
     const { error } = await supabase.from("grade_events").insert({
       school_id: profile.schoolId!,
-      grade: roleData.grade,
+      grade: roleData.grade || (form as any).grade, // Fallback to form grade if subject coordinator
       title: form.title,
       description: form.description || null,
       event_type: form.event_type,
@@ -136,6 +145,7 @@ const MasterSchedulerPage = () => {
       end_time: form.end_time || null,
       requires_parent_approval: form.requires_parent_approval,
       notes: form.notes || null,
+      weight: form.event_type === "exam" ? (parseInt(form.weight) || 0) : null,
       proposed_by: profile.id,
     });
 
@@ -145,7 +155,7 @@ const MasterSchedulerPage = () => {
     }
 
     toast({ title: "✅ האירוע נשלח לאישור הנהלה" });
-    setForm({ title: "", description: "", event_type: "exam", subject: "", event_date: "", start_time: "", end_time: "", requires_parent_approval: false, notes: "" });
+    setForm({ title: "", description: "", event_type: "exam", subject: "", event_date: "", start_time: "", end_time: "", requires_parent_approval: false, notes: "", weight: "20" });
     setDialogOpen(false);
     loadEvents();
   };
@@ -213,6 +223,14 @@ const MasterSchedulerPage = () => {
                   <Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} />
                 </div>
               </div>
+
+              {form.event_type === "exam" && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">משקל בציון הסופי (%)</label>
+                  <Input type="number" value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} min="0" max="100" />
+                  <p className="text-[10px] text-muted-foreground italic">* רכז מקצוע קובע את אחוז השקלול עבור המבחן</p>
+                </div>
+              )}
 
               {conflictWarning && (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 border border-warning/30">
@@ -287,6 +305,11 @@ const MasterSchedulerPage = () => {
                           </Badge>
                           {event.subject && (
                             <Badge variant="secondary" className="text-[10px]">{event.subject}</Badge>
+                          )}
+                          {event.weight && (
+                            <Badge variant="success" className="text-[10px] bg-success/10 text-success border-success/30 ml-2">
+                              {event.weight}% מהציון
+                            </Badge>
                           )}
                         </div>
                         {event.description && (

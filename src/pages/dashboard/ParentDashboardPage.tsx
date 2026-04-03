@@ -28,6 +28,7 @@ interface ChildInfo {
   classNumber: number | null;
   schoolName: string | null;
   schoolId: string | null;
+  classId: string | null;
   isApproved: boolean;
 }
 
@@ -115,6 +116,7 @@ const ParentDashboardPage = () => {
         classNumber: p.classes?.class_number || null,
         schoolName: p.schools?.name || null,
         schoolId: p.school_id || null,
+        classId: p.class_id || null,
         isApproved: p.is_approved,
       }));
       setChildren(kids);
@@ -255,7 +257,7 @@ const ParentDashboardPage = () => {
       const { data: lessons } = await supabase
         .from("lessons")
         .select("id")
-        .eq("class_id", selectedChild.id) // Note: need class_id from child, not id
+        .eq("class_id", selectedChild.classId!)
         .limit(100);
 
       // Simpler: get attendance records for the student

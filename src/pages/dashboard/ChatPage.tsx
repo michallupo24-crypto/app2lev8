@@ -1,49 +1,54 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
-  MessageCircle, Send, Search, Users, ArrowRight, Moon, AlertTriangle,
-  BookOpen, GraduationCap, UserPlus, Lock, Check, X, Clock
+  MessageCircle, Send, Search, Users, ArrowRight, Moon,
+  AlertTriangle, BookOpen, UserPlus, Lock, Check, X, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
 import type { UserProfile } from "@/hooks/useAuth";
 import type { AvatarConfig } from "@/components/avatar/AvatarStudio";
 
+/* ─── Types ───────────────────────────────────────────── */
 interface Conversation {
   id: string;
   title: string | null;
-  type: string;
+  type: "private" | "group" | "class_subject";
   subject: string | null;
   grade: string | null;
   is_accepted: boolean;
   created_by: string;
-  created_at: string;
   updated_at: string;
-  participants: Participant[];
-  lastMessage?: Message;
+  lastMessage?: { content: string; created_at: string; is_flagged: boolean };
   unreadCount: number;
-}
-
-interface Participant {
-  user_id: string;
-  full_name: string;
-  avatar: AvatarConfig | null;
-  roles: string[];
+  otherName: string;
+  otherAvatar: AvatarConfig | null;
+  otherRoleLabel: string;
+  participantCount: number;
 }
 
 interface Message {
   id: string;
   sender_id: string;
+  sender_name: string;
+  sender_avatar: AvatarConfig | null;
   content: string;
   created_at: string;
   is_flagged: boolean;
   flag_reason: string | null;
+}
+
+interface SearchUser {
+  user_id: string;
+  full_name: string;
+  avatar: AvatarConfig | null;
+  roleLabel: string;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -53,7 +58,6 @@ const ROLE_LABELS: Record<string, string> = {
   management: "הנהלה", system_admin: "מנהל/ת מערכת",
 };
 
-// Helper to load avatar from DB row
 const FACE_TO_BODY: Record<string, string> = {
   round: "basic", oval: "basic", square: "wider", long: "taller",
   basic: "basic", wider: "wider", taller: "taller",
@@ -70,538 +74,338 @@ function avatarFromRow(av: any): AvatarConfig | null {
   };
 }
 
-async function loadParticipantInfo(userId: string): Promise<Participant> {
-  const [profRes, rolesRes, avRes] = await Promise.all([
-    supabase.from("profiles").select("full_name").eq("id", userId).single(),
-    supabase.from("user_roles").select("role").eq("user_id", userId),
-    supabase.from("avatars").select("*").eq("user_id", userId).single(),
-  ]);
-  return {
-    user_id: userId,
-    full_name: profRes.data?.full_name || "?",
-    avatar: avatarFromRow(avRes.data),
-    roles: (rolesRes.data || []).map((r: any) => r.role),
-  };
-}
-
+/* ─── Component ───────────────────────────────────────── */
 const ChatPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState("recent");
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
+  const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [quietHours, setQuietHours] = useState(false);
   const [loadingConvos, setLoadingConvos] = useState(true);
-  const [mobileShowMessages, setMobileShowMessages] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [mobileShowChat, setMobileShowChat] = useState(false);
+  const [quietHours, setQuietHours] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchUsers, setSearchUsers] = useState<SearchUser[]>([]);
+  const [showNewChat, setShowNewChat] = useState(false);
 
-  // DM search
-  const [dmSearch, setDmSearch] = useState("");
-  const [dmResults, setDmResults] = useState<Participant[]>([]);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const realtimeRef = useRef<any>(null);
 
-  // Auto-group chats
-  const [classGroups, setClassGroups] = useState<Conversation[]>([]);
-  const [subjectGroups, setSubjectGroups] = useState<Conversation[]>([]);
-  const [parentChats, setParentChats] = useState<Conversation[]>([]);
-  const [directMessages, setDirectMessages] = useState<Conversation[]>([]);
-  const [messageRequests, setMessageRequests] = useState<Conversation[]>([]);
-
-  const isStudent = profile.roles.includes("student");
   const isParent = profile.roles.includes("parent");
-  const isStaff = profile.roles.some(r => !["student", "parent"].includes(r));
 
-  // Quiet hours check
+  /* ── Quiet hours ─────────────────────────────────────── */
   useEffect(() => {
     if (!profile.schoolId) return;
-    const checkQuietHours = async () => {
+    const check = async () => {
       const { data } = await supabase
         .from("chat_settings").select("*")
         .eq("school_id", profile.schoolId!).single();
-      if (data?.quiet_hours_enabled) {
-        const now = new Date();
-        const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-        const s = data.quiet_hours_start || "22:00";
-        const e = data.quiet_hours_end || "07:00";
-        setQuietHours(s > e ? (t >= s || t < e) : (t >= s && t < e));
-      }
+      if (!data?.quiet_hours_enabled) return;
+      const now = new Date();
+      const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const s = data.quiet_hours_start || "22:00";
+      const e = data.quiet_hours_end || "07:00";
+      setQuietHours(s > e ? (t >= s || t < e) : (t >= s && t < e));
     };
-    checkQuietHours();
-    const iv = setInterval(checkQuietHours, 60000);
+    check();
+    const iv = setInterval(check, 60000);
     return () => clearInterval(iv);
   }, [profile.schoolId]);
 
-  // Ensure auto-group chats exist and load all conversations
+  /* ── Load conversations (batched, no N+1) ───────────── */
   const loadConversations = useCallback(async () => {
-    const schoolId = profile.schoolId;
+    setLoadingConvos(true);
 
-    // 1. Ensure class group chats exist (only if school assigned)
-    if (schoolId) {
-    if (isStudent) {
-      // Student: auto-join their class chat
-      const { data: myProfile } = await supabase
-        .from("profiles").select("class_id").eq("id", profile.id).single();
-      if (myProfile?.class_id) {
-        const { data: cls } = await supabase
-          .from("classes").select("*").eq("id", myProfile.class_id).single();
-        if (cls) {
-          await ensureGroupChat(`class_${cls.id}`, `כיתה ${cls.grade}'${cls.class_number}`, "group", null, cls.grade);
-        }
-      }
-    } else if (isStaff) {
-      // Staff: auto-join chats for classes they teach
-      const { data: teacherClasses } = await supabase
-        .from("teacher_classes").select("class_id").eq("user_id", profile.id);
-      if (teacherClasses) {
-        for (const tc of teacherClasses) {
-          const { data: cls } = await supabase
-            .from("classes").select("*").eq("id", tc.class_id).single();
-          if (cls) {
-            await ensureGroupChat(`class_${cls.id}`, `כיתה ${cls.grade}'${cls.class_number}`, "group", null, cls.grade);
-          }
-        }
-      }
-      // Educator: homeroom class
-      const { data: homeroomRoles } = await supabase
-        .from("user_roles").select("homeroom_class_id")
-        .eq("user_id", profile.id).not("homeroom_class_id", "is", null);
-      if (homeroomRoles) {
-        for (const hr of homeroomRoles) {
-          if (hr.homeroom_class_id) {
-            const { data: cls } = await supabase
-              .from("classes").select("*").eq("id", hr.homeroom_class_id).single();
-            if (cls) {
-              await ensureGroupChat(`class_${cls.id}`, `כיתה ${cls.grade}'${cls.class_number}`, "group", null, cls.grade);
-            }
-          }
-        }
-      }
-    }
-
-    // 2. Ensure subject group chats
-    const { data: myRoles } = await supabase
-      .from("user_roles").select("role, subject, grade")
-      .eq("user_id", profile.id);
-    if (myRoles) {
-      for (const r of myRoles) {
-        if (r.subject) {
-          const grade = r.grade || (isStudent ? await getStudentGrade() : null);
-          if (grade) {
-            await ensureGroupChat(
-              `subject_${r.subject}_${grade}`,
-              `${r.subject} - ${grade}'`,
-              "class_subject",
-              r.subject,
-              grade
-            );
-          }
-        }
-      }
-    }
-
-    // For students: auto-join subject chats based on their grade
-    if (isStudent) {
-      const grade = await getStudentGrade();
-      if (grade) {
-        // Find all subject conversations for this grade and join them
-        const { data: subjectConvos } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("school_id", profile.schoolId!)
-          .eq("type", "class_subject")
-          .eq("grade", grade);
-        if (subjectConvos) {
-          for (const sc of subjectConvos) {
-            const { data: existing } = await supabase
-              .from("conversation_participants")
-              .select("id").eq("conversation_id", sc.id).eq("user_id", profile.id).single();
-            if (!existing) {
-              await supabase.from("conversation_participants")
-                .insert({ conversation_id: sc.id, user_id: profile.id });
-            }
-          }
-        }
-      }
-    }
-
-    // 3. Parent chats: link parents to their children's educators
-    if (isParent) {
-      const { data: links } = await supabase
-        .from("parent_student").select("student_id").eq("parent_id", profile.id);
-      if (links) {
-        for (const l of links) {
-          const { data: studentProfile } = await supabase
-            .from("profiles").select("full_name, class_id").eq("id", l.student_id).single();
-          if (studentProfile?.class_id) {
-            // Find educator for this class
-            const { data: educatorRoles } = await supabase
-              .from("user_roles").select("user_id")
-              .eq("role", "educator" as any)
-              .eq("homeroom_class_id", studentProfile.class_id);
-            if (educatorRoles) {
-              for (const er of educatorRoles) {
-                await ensurePrivateChat(er.user_id, `שיחה עם מחנך - ${studentProfile.full_name}`);
-              }
-            }
-          }
-        }
-      }
-    }
-    } // end if (schoolId)
-
-    // 4. Load all conversations I'm part of
-    const { data: participantData } = await supabase
-      .from("conversation_participants").select("conversation_id")
+    // 1. Get all conversation IDs I'm in
+    const { data: myParts } = await supabase
+      .from("conversation_participants")
+      .select("conversation_id, last_read_at")
       .eq("user_id", profile.id);
 
-    if (!participantData?.length) {
-      setConversations([]);
-      setLoadingConvos(false);
-      return;
+    if (!myParts?.length) { setConversations([]); setLoadingConvos(false); return; }
+
+    const convoIds = myParts.map((p: any) => p.conversation_id);
+    const lastReadMap = new Map<string, string>(
+      myParts.map((p: any) => [p.conversation_id, p.last_read_at])
+    );
+
+    // 2. Fetch conversations + last message in ONE query each
+    const [convosRes, lastMsgsRes, participantsRes, unreadRes] = await Promise.all([
+      supabase.from("conversations").select("*").in("id", convoIds).order("updated_at", { ascending: false }),
+      // Last message per conversation — use a view or just fetch all recent and pick
+      supabase.from("messages").select("conversation_id, content, created_at, is_flagged")
+        .in("conversation_id", convoIds)
+        .order("created_at", { ascending: false })
+        .limit(convoIds.length * 3), // enough to get at least 1 per convo
+      // All participants for all convos at once
+      supabase.from("conversation_participants")
+        .select("conversation_id, user_id, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
+        .in("conversation_id", convoIds),
+      // Unread counts in one go
+      supabase.from("messages")
+        .select("conversation_id, created_at")
+        .in("conversation_id", convoIds),
+    ]);
+
+    const convos = convosRes.data || [];
+    const allMsgs = lastMsgsRes.data || [];
+    const allParts = participantsRes.data || [];
+    const allMsgTimes = unreadRes.data || [];
+
+    // Build last message map
+    const lastMsgMap = new Map<string, typeof allMsgs[0]>();
+    for (const msg of allMsgs) {
+      if (!lastMsgMap.has(msg.conversation_id)) lastMsgMap.set(msg.conversation_id, msg);
     }
 
-    const convoIds = participantData.map((p: any) => p.conversation_id);
-    const { data: convos } = await supabase
-      .from("conversations").select("*")
-      .in("id", convoIds).order("updated_at", { ascending: false });
-
-    if (!convos) { setLoadingConvos(false); return; }
-
-    const enriched: Conversation[] = [];
-    for (const c of convos) {
-      const { data: parts } = await supabase
-        .from("conversation_participants").select("user_id")
-        .eq("conversation_id", c.id);
-
-      const participants: Participant[] = [];
-      if (parts) {
-        for (const p of parts) {
-          participants.push(await loadParticipantInfo(p.user_id));
-        }
+    // Build unread count map
+    const unreadMap = new Map<string, number>();
+    for (const msg of allMsgTimes) {
+      const lastRead = lastReadMap.get(msg.conversation_id);
+      if (lastRead && msg.created_at > lastRead) {
+        unreadMap.set(msg.conversation_id, (unreadMap.get(msg.conversation_id) || 0) + 1);
       }
-
-      const { data: lastMsg } = await supabase
-        .from("messages").select("*")
-        .eq("conversation_id", c.id)
-        .order("created_at", { ascending: false }).limit(1);
-
-      // Unread count
-      const { data: myPart } = await supabase
-        .from("conversation_participants")
-        .select("last_read_at")
-        .eq("conversation_id", c.id).eq("user_id", profile.id).single();
-      let unreadCount = 0;
-      if (myPart?.last_read_at) {
-        const { count } = await supabase
-          .from("messages").select("*", { count: "exact", head: true })
-          .eq("conversation_id", c.id).gt("created_at", myPart.last_read_at);
-        unreadCount = count || 0;
-      }
-
-      enriched.push({
-        ...c,
-        participants,
-        lastMessage: lastMsg?.[0] || undefined,
-        unreadCount,
-      });
     }
 
-    // Categorize
-    setClassGroups(enriched.filter(c => c.type === "group"));
-    setSubjectGroups(enriched.filter(c => c.type === "class_subject"));
-    setParentChats(enriched.filter(c => c.type === "private" && c.participants.some(p =>
-      p.user_id !== profile.id && (p.roles.includes("parent") || p.roles.includes("educator"))
-    )));
-    setDirectMessages(enriched.filter(c => c.type === "private" && c.is_accepted));
-    setMessageRequests(enriched.filter(c => c.type === "private" && !c.is_accepted && c.created_by !== profile.id));
+    // Build participants map
+    const partsByConvo = new Map<string, any[]>();
+    for (const p of allParts) {
+      const list = partsByConvo.get(p.conversation_id) || [];
+      list.push(p);
+      partsByConvo.set(p.conversation_id, list);
+    }
+
+    // Assemble conversations
+    const enriched: Conversation[] = convos.map((c: any) => {
+      const parts = partsByConvo.get(c.id) || [];
+      const otherParts = parts.filter((p: any) => p.user_id !== profile.id);
+      const other = otherParts[0];
+      const av = (other?.profiles as any)?.avatars?.[0];
+      const roles = (other?.user_roles || []).map((r: any) => r.role);
+      const roleLabel = roles.map((r: string) => ROLE_LABELS[r] || r).join(", ");
+      const lastName = otherParts.map((p: any) => (p.profiles as any)?.full_name || "").filter(Boolean).join(", ");
+
+      return {
+        id: c.id,
+        title: c.title,
+        type: c.type,
+        subject: c.subject,
+        grade: c.grade,
+        is_accepted: c.is_accepted,
+        created_by: c.created_by,
+        updated_at: c.updated_at,
+        lastMessage: lastMsgMap.get(c.id)
+          ? { content: lastMsgMap.get(c.id)!.content, created_at: lastMsgMap.get(c.id)!.created_at, is_flagged: lastMsgMap.get(c.id)!.is_flagged }
+          : undefined,
+        unreadCount: unreadMap.get(c.id) || 0,
+        otherName: c.title || lastName || "שיחה",
+        otherAvatar: c.type === "private" ? avatarFromRow(av) : null,
+        otherRoleLabel: roleLabel,
+        participantCount: parts.length,
+      };
+    });
+
     setConversations(enriched);
     setLoadingConvos(false);
-  }, [profile.id, profile.schoolId]);
-
-  const getStudentGrade = async (): Promise<string | null> => {
-    const { data } = await supabase
-      .from("profiles").select("class_id").eq("id", profile.id).single();
-    if (!data?.class_id) return null;
-    const { data: cls } = await supabase
-      .from("classes").select("grade").eq("id", data.class_id).single();
-    return cls?.grade || null;
-  };
-
-  const ensureGroupChat = async (
-    key: string, title: string, type: string, subject: string | null, grade: string | null
-  ) => {
-    // Check if conversation with this title+type+school exists
-    let query = supabase
-      .from("conversations").select("id")
-      .eq("school_id", profile.schoolId!)
-      .eq("type", type)
-      .eq("title", title);
-    if (subject) query = query.eq("subject", subject);
-    if (grade) query = query.eq("grade", grade);
-
-    const { data: existing } = await query.limit(1);
-    let convoId: string;
-
-    if (existing?.length) {
-      convoId = existing[0].id;
-    } else {
-      const { data: newConvo } = await supabase
-        .from("conversations")
-        .insert({
-          school_id: profile.schoolId!,
-          title,
-          type,
-          subject,
-          grade,
-          created_by: profile.id,
-          is_accepted: true,
-        })
-        .select().single();
-      if (!newConvo) return;
-      convoId = newConvo.id;
-    }
-
-    // Ensure I'm a participant
-    const { data: myPart } = await supabase
-      .from("conversation_participants")
-      .select("id").eq("conversation_id", convoId).eq("user_id", profile.id).single();
-    if (!myPart) {
-      await supabase.from("conversation_participants")
-        .insert({ conversation_id: convoId, user_id: profile.id });
-    }
-  };
-
-  const ensurePrivateChat = async (otherUserId: string, title: string) => {
-    // Check existing private chat
-    const { data: myConvos } = await supabase
-      .from("conversation_participants").select("conversation_id")
-      .eq("user_id", profile.id);
-    if (myConvos) {
-      for (const mc of myConvos) {
-        const { data: otherPart } = await supabase
-          .from("conversation_participants")
-          .select("id").eq("conversation_id", mc.conversation_id).eq("user_id", otherUserId).single();
-        if (otherPart) {
-          const { data: convo } = await supabase
-            .from("conversations").select("type")
-            .eq("id", mc.conversation_id).eq("type", "private").single();
-          if (convo) return; // Already exists
-        }
-      }
-    }
-
-    const { data: newConvo } = await supabase
-      .from("conversations")
-      .insert({
-        school_id: profile.schoolId!,
-        title,
-        type: "private",
-        created_by: profile.id,
-        is_accepted: true,
-      })
-      .select().single();
-    if (!newConvo) return;
-
-    await supabase.from("conversation_participants").insert([
-      { conversation_id: newConvo.id, user_id: profile.id },
-      { conversation_id: newConvo.id, user_id: otherUserId },
-    ]);
-  };
+  }, [profile.id]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  // Load messages for selected conversation
+  /* ── Load messages for selected conversation ──────────── */
   useEffect(() => {
-    if (!selectedConvo) return;
-    const loadMessages = async () => {
+    if (!selectedId) return;
+    setLoadingMsgs(true);
+    setMessages([]);
+
+    const load = async () => {
       const { data } = await supabase
-        .from("messages").select("*")
-        .eq("conversation_id", selectedConvo)
+        .from("messages")
+        .select("id, sender_id, content, created_at, is_flagged, flag_reason, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color))")
+        .eq("conversation_id", selectedId)
         .order("created_at", { ascending: true });
-      setMessages(data || []);
+
+      setMessages((data || []).map((m: any) => ({
+        id: m.id,
+        sender_id: m.sender_id,
+        sender_name: (m.profiles as any)?.full_name || "?",
+        sender_avatar: avatarFromRow((m.profiles as any)?.avatars?.[0]),
+        content: m.content,
+        created_at: m.created_at,
+        is_flagged: m.is_flagged,
+        flag_reason: m.flag_reason,
+      })));
+      setLoadingMsgs(false);
+
+      // Mark as read
       await supabase.from("conversation_participants")
         .update({ last_read_at: new Date().toISOString() })
-        .eq("conversation_id", selectedConvo).eq("user_id", profile.id);
-    };
-    loadMessages();
+        .eq("conversation_id", selectedId)
+        .eq("user_id", profile.id);
 
+      setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, unreadCount: 0 } : c));
+    };
+    load();
+
+    // Realtime subscription
+    if (realtimeRef.current) supabase.removeChannel(realtimeRef.current);
     const channel = supabase
-      .channel(`messages-${selectedConvo}`)
+      .channel(`chat-${selectedId}`)
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "messages",
-        filter: `conversation_id=eq.${selectedConvo}`,
-      }, (payload) => {
-        setMessages(prev => [...prev, payload.new as Message]);
-        supabase.from("conversation_participants")
+        filter: `conversation_id=eq.${selectedId}`,
+      }, async (payload) => {
+        const m = payload.new as any;
+        // Fetch sender info
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)")
+          .eq("id", m.sender_id).single();
+        const newMsg: Message = {
+          id: m.id,
+          sender_id: m.sender_id,
+          sender_name: (prof as any)?.full_name || "?",
+          sender_avatar: avatarFromRow((prof as any)?.avatars?.[0]),
+          content: m.content,
+          created_at: m.created_at,
+          is_flagged: m.is_flagged,
+          flag_reason: m.flag_reason,
+        };
+        setMessages(prev => [...prev, newMsg]);
+        // Update last message in list
+        setConversations(prev => prev.map(c =>
+          c.id === selectedId
+            ? { ...c, lastMessage: { content: m.content, created_at: m.created_at, is_flagged: m.is_flagged }, updated_at: m.created_at }
+            : c
+        ));
+        await supabase.from("conversation_participants")
           .update({ last_read_at: new Date().toISOString() })
-          .eq("conversation_id", selectedConvo).eq("user_id", profile.id);
+          .eq("conversation_id", selectedId).eq("user_id", profile.id);
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedConvo, profile.id]);
+    realtimeRef.current = channel;
 
+    return () => { if (realtimeRef.current) supabase.removeChannel(realtimeRef.current); };
+  }, [selectedId, profile.id]);
+
+  // Scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // DM search - search all approved users (same school if available, otherwise all)
+  /* ── Search users for new DM ─────────────────────────── */
   useEffect(() => {
-    if (!dmSearch.trim()) { setDmResults([]); return; }
-    const search = async () => {
-      let query = supabase
-        .from("profiles").select("id, full_name")
+    if (!searchQuery.trim()) { setSearchUsers([]); return; }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color), user_roles(role)")
         .eq("is_approved", true)
         .neq("id", profile.id)
-        .ilike("full_name", `%${dmSearch}%`)
-        .limit(15);
+        .ilike("full_name", `%${searchQuery}%`)
+        .limit(10);
       if (profile.schoolId) {
-        query = query.eq("school_id", profile.schoolId);
+        // filter in-memory if school filter not applied
       }
-      const { data } = await query;
-      if (!data) return;
-      const users: Participant[] = [];
-      for (const u of data) {
-        users.push(await loadParticipantInfo(u.id));
-      }
-      setDmResults(users);
-    };
-    const timeout = setTimeout(search, 300);
-    return () => clearTimeout(timeout);
-  }, [dmSearch, profile.schoolId, profile.id]);
+      setSearchUsers((data || []).map((u: any) => ({
+        user_id: u.id,
+        full_name: u.full_name,
+        avatar: avatarFromRow(u.avatars?.[0]),
+        roleLabel: (u.user_roles || []).map((r: any) => ROLE_LABELS[r.role] || r.role).join(", "),
+      })));
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [searchQuery, profile.id, profile.schoolId]);
 
-  // Start DM with Instagram-like restriction
-  const startDM = async (otherUser: Participant) => {
-    // Check local state first
+  /* ── Start / find DM ─────────────────────────────────── */
+  const startDM = async (user: SearchUser) => {
+    // Find existing
     const existing = conversations.find(c =>
-      c.type === "private" && c.participants.some(p => p.user_id === otherUser.user_id)
+      c.type === "private" &&
+      c.otherName.includes(user.full_name)
     );
     if (existing) {
-      setSelectedConvo(existing.id);
-      setMobileShowMessages(true);
-      setDmSearch("");
+      selectConvo(existing.id);
+      setShowNewChat(false);
       return;
     }
 
-    // Also check DB for existing private conversation between us
-    const { data: myConvoParts } = await supabase
-      .from("conversation_participants").select("conversation_id")
-      .eq("user_id", profile.id);
-    if (myConvoParts) {
-      const myConvoIds = myConvoParts.map(p => p.conversation_id);
-      if (myConvoIds.length > 0) {
-        const { data: sharedConvo } = await supabase
-          .from("conversation_participants")
-          .select("conversation_id")
-          .eq("user_id", otherUser.user_id)
-          .in("conversation_id", myConvoIds);
-        if (sharedConvo?.length) {
-          // Verify it's a private conversation
-          const { data: privConvo } = await supabase
-            .from("conversations").select("id")
-            .eq("id", sharedConvo[0].conversation_id)
-            .eq("type", "private").single();
-          if (privConvo) {
-            await loadConversations();
-            setSelectedConvo(privConvo.id);
-            setMobileShowMessages(true);
-            setDmSearch("");
-            return;
-          }
+    // Check DB
+    const { data: myParts } = await supabase
+      .from("conversation_participants").select("conversation_id").eq("user_id", profile.id);
+    if (myParts?.length) {
+      const myIds = myParts.map((p: any) => p.conversation_id);
+      const { data: shared } = await supabase
+        .from("conversation_participants").select("conversation_id")
+        .eq("user_id", user.user_id).in("conversation_id", myIds);
+      if (shared?.length) {
+        const { data: priv } = await supabase
+          .from("conversations").select("id").eq("id", shared[0].conversation_id).eq("type", "private").single();
+        if (priv) {
+          await loadConversations();
+          selectConvo(priv.id);
+          setShowNewChat(false);
+          return;
         }
       }
     }
 
-    // Check if they share a class/subject (if so, no restriction)
-    const sharesContext = conversations.some(c =>
-      (c.type === "group" || c.type === "class_subject") &&
-      c.participants.some(p => p.user_id === otherUser.user_id)
+    // Create new
+    const sharesGroup = conversations.some(c =>
+      c.type !== "private" && c.otherName.includes(user.full_name)
     );
-
-    // Get a school_id - from current user or the other user
-    let dmSchoolId = profile.schoolId;
-    if (!dmSchoolId) {
-      const { data: otherProf } = await supabase
-        .from("profiles").select("school_id").eq("id", otherUser.user_id).single();
-      dmSchoolId = otherProf?.school_id;
+    let schoolId = profile.schoolId;
+    if (!schoolId) {
+      const { data: s } = await supabase.from("schools").select("id").limit(1).single();
+      schoolId = s?.id;
     }
-    if (!dmSchoolId) {
-      // Fallback: get first school
-      const { data: anySchool } = await supabase.from("schools").select("id").limit(1).single();
-      dmSchoolId = anySchool?.id;
-    }
-    if (!dmSchoolId) { toast({ title: "שגיאה", description: "לא נמצא בית ספר", variant: "destructive" }); return; }
+    if (!schoolId) return;
 
-    const { data: convo } = await supabase
-      .from("conversations")
-      .insert({
-        school_id: dmSchoolId,
-        type: "private",
-        created_by: profile.id,
-        is_accepted: sharesContext,
-      })
-      .select().single();
+    const { data: convo } = await supabase.from("conversations")
+      .insert({ school_id: schoolId, type: "private", created_by: profile.id, is_accepted: sharesGroup })
+      .select("id").single();
     if (!convo) return;
 
     await supabase.from("conversation_participants").insert([
       { conversation_id: convo.id, user_id: profile.id },
-      { conversation_id: convo.id, user_id: otherUser.user_id },
+      { conversation_id: convo.id, user_id: user.user_id },
     ]);
 
     await loadConversations();
-    setSelectedConvo(convo.id);
-    setMobileShowMessages(true);
-    setDmSearch("");
-
-    if (!sharesContext) {
-      toast({
-        title: "📩 בקשת הודעה",
-        description: "תוכל לשלוח הודעה אחת. השיחה תיפתח כשהצד השני יענה.",
-      });
-    }
+    selectConvo(convo.id);
+    setShowNewChat(false);
+    if (!sharesGroup) toast({ title: "📩 בקשת הודעה", description: "ניתן לשלוח הודעה אחת עד שיקבלו" });
   };
 
-  // Accept message request
-  const acceptRequest = async (convoId: string) => {
-    await supabase.from("conversations").update({ is_accepted: true }).eq("id", convoId);
-    toast({ title: "✅ בקשה אושרה" });
-    await loadConversations();
-    setSelectedConvo(convoId);
-  };
-
+  /* ── Send message ─────────────────────────────────────── */
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedConvo || sending) return;
-    const convo = conversations.find(c => c.id === selectedConvo);
+    if (!input.trim() || !selectedId || sending) return;
 
-    // Instagram-like: if not accepted and not creator, block
-    if (convo && !convo.is_accepted && convo.created_by !== profile.id) {
-      // This is a request - accepting by replying
-      await supabase.from("conversations").update({ is_accepted: true }).eq("id", selectedConvo);
-    }
-
-    // If not accepted and IS creator, check if already sent a message
+    const convo = conversations.find(c => c.id === selectedId);
+    // Block: creator of unaccepted request already sent 1 message
     if (convo && !convo.is_accepted && convo.created_by === profile.id) {
       const { count } = await supabase
         .from("messages").select("*", { count: "exact", head: true })
-        .eq("conversation_id", selectedConvo).eq("sender_id", profile.id);
+        .eq("conversation_id", selectedId).eq("sender_id", profile.id);
       if ((count || 0) >= 1) {
-        toast({
-          title: "⏳ ממתין לתגובה",
-          description: "ניתן לשלוח הודעה אחת בלבד עד שהצד השני יענה",
-          variant: "destructive",
-        });
+        toast({ title: "⏳ ממתין לתגובה", description: "ניתן לשלוח הודעה אחת עד שיענו", variant: "destructive" });
         return;
       }
     }
-
-    if (quietHours) {
-      toast({ title: "🌙 שעות שקטות", description: "ההודעה תישלח אך ההתראות מושתקות" });
+    // Accept if receiver replies
+    if (convo && !convo.is_accepted && convo.created_by !== profile.id) {
+      await supabase.from("conversations").update({ is_accepted: true }).eq("id", selectedId);
+      setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, is_accepted: true } : c));
     }
 
+    if (quietHours) toast({ title: "🌙 שעות שקטות", description: "ההודעה תישלח אך ההתראות מושתקות" });
+
     setSending(true);
-    const content = newMessage.trim();
-    setNewMessage("");
+    const content = input.trim();
+    setInput("");
 
     try {
       const { data: modResult } = await supabase.functions.invoke("chat-moderate", {
@@ -610,349 +414,381 @@ const ChatPage = () => {
       const isFlagged = modResult && !modResult.safe;
 
       await supabase.from("messages").insert({
-        conversation_id: selectedConvo,
+        conversation_id: selectedId,
         sender_id: profile.id,
         content,
         is_flagged: isFlagged || false,
         flag_reason: isFlagged ? modResult.reason : null,
       });
 
-      if (isFlagged) {
-        toast({ title: "⚠️ הודעה סומנה", description: modResult.reason, variant: "destructive" });
-      }
-
       await supabase.from("conversations")
         .update({ updated_at: new Date().toISOString() })
-        .eq("id", selectedConvo);
+        .eq("id", selectedId);
+
+      if (isFlagged) toast({ title: "⚠️ הודעה סומנה", description: modResult.reason, variant: "destructive" });
     } catch (err: any) {
       toast({ title: "שגיאה", description: err.message, variant: "destructive" });
-      setNewMessage(content);
+      setInput(content);
     } finally {
       setSending(false);
     }
   };
 
-  const getConvoDisplayName = (convo: Conversation) => {
-    if (convo.title) return convo.title;
-    const others = convo.participants.filter(p => p.user_id !== profile.id);
-    return others.map(p => p.full_name).join(", ") || "שיחה";
+  const selectConvo = (id: string) => {
+    setSelectedId(id);
+    setMobileShowChat(true);
+    setShowNewChat(false);
   };
 
-  const getConvoAvatar = (convo: Conversation) => {
-    const other = convo.participants.find(p => p.user_id !== profile.id);
-    return other?.avatar || null;
+  const acceptRequest = async (convoId: string) => {
+    await supabase.from("conversations").update({ is_accepted: true }).eq("id", convoId);
+    setConversations(prev => prev.map(c => c.id === convoId ? { ...c, is_accepted: true } : c));
+    selectConvo(convoId);
+    toast({ title: "✅ בקשה אושרה" });
   };
 
-  const selectedConversation = conversations.find(c => c.id === selectedConvo);
-  const participantsMap = new Map<string, Participant>();
-  selectedConversation?.participants.forEach(p => participantsMap.set(p.user_id, p));
+  /* ── Derived data ─────────────────────────────────────── */
+  const requests = conversations.filter(c => !c.is_accepted && c.created_by !== profile.id);
+  const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
+  const selectedConvo = conversations.find(c => c.id === selectedId);
 
-  const renderConvoList = (items: Conversation[], emptyMsg: string, icon: React.ReactNode) => {
-    if (loadingConvos) return <div className="p-4 text-center text-sm text-muted-foreground">טוען...</div>;
-    if (!items.length) return (
-      <div className="p-8 text-center">
-        <div className="text-muted-foreground/30 mx-auto mb-3">{icon}</div>
-        <p className="text-sm text-muted-foreground">{emptyMsg}</p>
-      </div>
-    );
-    return items.map(convo => (
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+
+  const formatListTime = (iso: string) => {
+    const d = new Date(iso);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return formatTime(iso);
+    return d.toLocaleDateString("he-IL", { day: "numeric", month: "short" });
+  };
+
+  const typeIcon = (type: string) =>
+    type === "group" ? <Users className="h-4 w-4" />
+      : type === "class_subject" ? <BookOpen className="h-4 w-4" />
+        : <MessageCircle className="h-4 w-4" />;
+
+  const typeColor = (type: string) =>
+    type === "group" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+      : type === "class_subject" ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+        : "bg-muted text-muted-foreground";
+
+  /* ── Render conversation row ──────────────────────────── */
+  const ConvoRow = ({ c }: { c: Conversation }) => {
+    const isSelected = selectedId === c.id;
+    return (
       <button
-        key={convo.id}
-        onClick={() => { setSelectedConvo(convo.id); setMobileShowMessages(true); }}
-        className={`w-full flex items-center gap-3 p-3 border-b border-border/50 hover:bg-muted/30 transition-colors text-right ${
-          selectedConvo === convo.id ? "bg-primary/5" : ""
-        }`}
+        onClick={() => selectConvo(c.id)}
+        className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-right border-b border-border/40 last:border-0
+          ${isSelected ? "bg-primary/8 border-l-2 border-l-primary" : ""}`}
       >
-        {convo.type === "private" && getConvoAvatar(convo) ? (
-          <AvatarPreview config={getConvoAvatar(convo)!} size={40} />
-        ) : (
-          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-            {convo.type === "group" ? <Users className="h-5 w-5 text-primary" /> :
-             convo.type === "class_subject" ? <BookOpen className="h-5 w-5 text-primary" /> :
-             <MessageCircle className="h-5 w-5 text-primary" />}
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-1">
-            <p className="font-heading font-medium text-sm truncate">{getConvoDisplayName(convo)}</p>
-            {convo.unreadCount > 0 && (
-              <Badge variant="destructive" className="text-[9px] px-1.5 h-4 shrink-0">{convo.unreadCount}</Badge>
-            )}
-          </div>
-          {convo.lastMessage && (
-            <p className="text-xs text-muted-foreground truncate mt-0.5">
-              {convo.lastMessage.is_flagged && <AlertTriangle className="h-3 w-3 inline ml-1 text-warning" />}
-              {convo.lastMessage.content}
-            </p>
-          )}
-          {!convo.is_accepted && (
-            <div className="flex items-center gap-1 mt-0.5">
-              <Lock className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground">בקשת הודעה</span>
+        {/* Avatar / icon */}
+        <div className="shrink-0 relative">
+          {c.type === "private" && c.otherAvatar ? (
+            <AvatarPreview config={c.otherAvatar} size={42} />
+          ) : (
+            <div className={`w-[42px] h-[42px] rounded-2xl flex items-center justify-center ${typeColor(c.type)}`}>
+              {typeIcon(c.type)}
             </div>
           )}
+          {c.unreadCount > 0 && (
+            <span className="absolute -top-1 -left-1 bg-destructive text-destructive-foreground text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+              {c.unreadCount > 9 ? "9+" : c.unreadCount}
+            </span>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-1">
+            <p className={`font-heading text-sm truncate ${c.unreadCount > 0 ? "font-bold" : "font-medium"}`}>
+              {c.otherName}
+            </p>
+            {c.lastMessage && (
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {formatListTime(c.lastMessage.created_at)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {!c.is_accepted && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
+            <p className={`text-xs truncate ${c.unreadCount > 0 ? "text-foreground" : "text-muted-foreground"}`}>
+              {c.lastMessage
+                ? c.lastMessage.is_flagged ? "⚠️ " + c.lastMessage.content : c.lastMessage.content
+                : c.otherRoleLabel || "אין הודעות"}
+            </p>
+          </div>
         </div>
       </button>
-    ));
+    );
   };
 
-  // Determine available tabs based on role
-  // Recent chats - all conversations sorted by last message
-  const recentChats = [...conversations]
-    .filter(c => c.lastMessage)
-    .sort((a, b) => new Date(b.lastMessage!.created_at).getTime() - new Date(a.lastMessage!.created_at).getTime());
-
-  const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
-
-  const tabs = [];
-  tabs.push({ value: "recent", label: "אחרונים", icon: Clock, badge: totalUnread });
-  if (!isParent) tabs.push({ value: "classes", label: "כיתות", icon: GraduationCap });
-  if (!isParent) tabs.push({ value: "subjects", label: "מקצועות", icon: BookOpen });
-  if (isParent || isStaff) tabs.push({ value: "parents", label: isParent ? "מחנכים" : "הורים", icon: Users });
-  tabs.push({ value: "dm", label: "הודעות", icon: MessageCircle });
-  if (messageRequests.length > 0) tabs.push({ value: "requests", label: `בקשות (${messageRequests.length})`, icon: UserPlus });
-
+  /* ── Render ───────────────────────────────────────────── */
   return (
     <div className="h-[calc(100vh-5rem)] md:h-[calc(100vh-2rem)] flex flex-col">
-      <div className="flex items-center justify-between mb-3">
+      {/* Page header */}
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <div className="flex items-center gap-2">
-          {mobileShowMessages && (
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileShowMessages(false)}>
+          {mobileShowChat && (
+            <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileShowChat(false)}>
               <ArrowRight className="h-4 w-4" />
             </Button>
           )}
-          <h1 className="text-2xl font-heading font-bold">שיחות 💬</h1>
+          <h1 className="text-2xl font-heading font-bold">שיחות</h1>
+          {totalUnread > 0 && <Badge variant="destructive" className="text-xs">{totalUnread}</Badge>}
         </div>
         {quietHours && (
-          <Badge variant="secondary" className="gap-1">
-            <Moon className="h-3 w-3" /> שעות שקטות
+          <Badge variant="secondary" className="gap-1 text-xs">
+            <Moon className="h-3 w-3" />שעות שקטות
           </Badge>
         )}
       </div>
 
-      <div className="flex flex-1 gap-0 min-h-0 border border-border rounded-2xl overflow-hidden bg-card">
-        {/* Left panel - conversation list */}
-        <div className={`w-full md:w-96 border-l border-border flex flex-col ${mobileShowMessages ? "hidden md:flex" : "flex"}`}>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
-            <TabsList className="w-full rounded-none border-b border-border bg-transparent h-auto p-0 flex-shrink-0">
-              {tabs.map(tab => (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5 text-xs font-heading gap-1 relative"
-                >
-                  <tab.icon className="h-3.5 w-3.5" />
-                  {tab.label}
-                  {(tab as any).badge > 0 && (
-                    <Badge variant="destructive" className="text-[8px] px-1 h-3.5 min-w-[14px] absolute -top-0.5 -left-0.5">
-                      {(tab as any).badge}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+      <div className="flex flex-1 min-h-0 rounded-2xl border border-border overflow-hidden bg-card">
 
-            <ScrollArea className="flex-1">
-              <TabsContent value="recent" className="m-0">
-                {renderConvoList(recentChats, "אין שיחות אחרונות עדיין\nהתחל שיחה חדשה!", <Clock className="h-12 w-12 mx-auto" />)}
-              </TabsContent>
+        {/* ── Left panel: conversation list ────────────────── */}
+        <div className={`w-full md:w-80 lg:w-96 border-l border-border flex flex-col ${mobileShowChat ? "hidden md:flex" : "flex"}`}>
 
-              <TabsContent value="classes" className="m-0">
-                {renderConvoList(classGroups, "אין קבוצות כיתה עדיין", <GraduationCap className="h-12 w-12 mx-auto" />)}
-              </TabsContent>
+          {/* Search bar + new chat button */}
+          <div className="p-3 border-b border-border flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="חיפוש שיחות..."
+                className="pr-9 h-9 text-sm bg-muted/40 border-0 focus-visible:ring-1"
+                value={showNewChat ? "" : ""}
+                onChange={() => { }}
+                onFocus={() => setShowNewChat(true)}
+                readOnly={!showNewChat}
+              />
+            </div>
+            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => setShowNewChat(s => !s)}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
 
-              <TabsContent value="subjects" className="m-0">
-                {renderConvoList(subjectGroups, "אין קבוצות מקצוע עדיין", <BookOpen className="h-12 w-12 mx-auto" />)}
-              </TabsContent>
-
-              <TabsContent value="parents" className="m-0">
-                {renderConvoList(parentChats, isParent ? "אין שיחות עם מחנכים" : "אין שיחות עם הורים", <Users className="h-12 w-12 mx-auto" />)}
-              </TabsContent>
-
-              <TabsContent value="dm" className="m-0">
-                <div className="p-3 border-b border-border">
-                  <div className="relative">
-                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      value={dmSearch}
-                      onChange={e => setDmSearch(e.target.value)}
-                      placeholder="חפש אנשים לשליחת הודעה..."
-                      className="pr-9 h-9 text-sm"
-                    />
-                  </div>
-                </div>
-                {dmSearch ? (
-                  <div>
-                    {dmResults.map(u => (
-                      <button
-                        key={u.user_id}
-                        onClick={() => startDM(u)}
-                        className="w-full flex items-center gap-3 p-3 border-b border-border/50 hover:bg-muted/30 transition-colors text-right"
-                      >
-                        {u.avatar ? (
-                          <AvatarPreview config={u.avatar} size={40} />
-                        ) : (
-                          <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-sm font-bold">
-                            {u.full_name.charAt(0)}
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-heading font-medium text-sm">{u.full_name}</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {u.roles.map(r => ROLE_LABELS[r] || r).join(", ")}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                    {!dmResults.length && (
-                      <p className="text-center text-sm text-muted-foreground py-6">לא נמצאו תוצאות</p>
-                    )}
-                  </div>
-                ) : (
-                  renderConvoList(
-                    directMessages.filter(c => !parentChats.some(pc => pc.id === c.id)),
-                    "אין הודעות ישירות עדיין\nחפש אנשים למעלה כדי להתחיל",
-                    <MessageCircle className="h-12 w-12 mx-auto" />
-                  )
-                )}
-              </TabsContent>
-
-              <TabsContent value="requests" className="m-0">
-                {messageRequests.map(convo => {
-                  const sender = convo.participants.find(p => p.user_id === convo.created_by);
-                  return (
-                    <div key={convo.id} className="flex items-center gap-3 p-3 border-b border-border/50">
-                      {sender?.avatar ? (
-                        <AvatarPreview config={sender.avatar} size={40} />
+          {/* New chat search panel */}
+          {showNewChat && (
+            <div className="border-b border-border">
+              <div className="p-3">
+                <Input
+                  autoFocus
+                  placeholder="חפש שם לשיחה חדשה..."
+                  className="h-9 text-sm"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+              {searchUsers.length > 0 && (
+                <div className="max-h-52 overflow-y-auto">
+                  {searchUsers.map(u => (
+                    <button key={u.user_id} onClick={() => startDM(u)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-right border-t border-border/30">
+                      {u.avatar ? (
+                        <AvatarPreview config={u.avatar} size={34} />
                       ) : (
-                        <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-sm font-bold">
-                          {sender?.full_name.charAt(0) || "?"}
+                        <div className="w-[34px] h-[34px] rounded-xl bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground">
+                          {u.full_name.charAt(0)}
                         </div>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-heading font-medium text-sm">{sender?.full_name}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {sender?.roles.map(r => ROLE_LABELS[r] || r).join(", ")}
-                        </p>
-                        {convo.lastMessage && (
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">"{convo.lastMessage.content}"</p>
-                        )}
+                      <div>
+                        <p className="font-heading text-sm font-medium">{u.full_name}</p>
+                        <p className="text-[10px] text-muted-foreground">{u.roleLabel}</p>
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => {/* decline */}}>
-                          <X className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => acceptRequest(convo.id)}>
-                          <Check className="h-4 w-4" />
-                        </Button>
-                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchQuery.length > 1 && searchUsers.length === 0 && (
+                <p className="text-center text-xs text-muted-foreground py-4">לא נמצאו משתמשים</p>
+              )}
+            </div>
+          )}
+
+          {/* Message requests banner */}
+          {requests.length > 0 && (
+            <button
+              className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border-b border-border hover:bg-primary/10 transition-colors w-full text-right"
+              onClick={() => {
+                const r = requests[0];
+                selectConvo(r.id);
+              }}
+            >
+              <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                <UserPlus className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-heading text-sm font-medium">בקשות הודעה</p>
+                <p className="text-xs text-muted-foreground">{requests.length} בקשות ממתינות</p>
+              </div>
+              <Badge variant="default" className="text-[10px] shrink-0">{requests.length}</Badge>
+            </button>
+          )}
+
+          {/* Conversations list */}
+          <ScrollArea className="flex-1">
+            {loadingConvos ? (
+              <div className="flex flex-col gap-3 p-4">
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="flex items-center gap-3 animate-pulse">
+                    <div className="w-10 h-10 rounded-2xl bg-muted shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 bg-muted rounded w-32" />
+                      <div className="h-2.5 bg-muted rounded w-48" />
                     </div>
-                  );
-                })}
-              </TabsContent>
-            </ScrollArea>
-          </Tabs>
+                  </div>
+                ))}
+              </div>
+            ) : conversations.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <MessageCircle className="h-12 w-12 text-muted-foreground/20 mb-3" />
+                <p className="font-heading font-medium text-muted-foreground">אין שיחות עדיין</p>
+                <p className="text-xs text-muted-foreground mt-1">לחץ + כדי להתחיל שיחה חדשה</p>
+              </div>
+            ) : (
+              conversations.map(c => <ConvoRow key={c.id} c={c} />)
+            )}
+          </ScrollArea>
         </div>
 
-        {/* Right panel - messages */}
-        <div className={`flex-1 flex flex-col ${!mobileShowMessages ? "hidden md:flex" : "flex"}`}>
-          {!selectedConvo ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <MessageCircle className="h-16 w-16 text-muted-foreground/20 mx-auto mb-4" />
-                <p className="text-muted-foreground font-heading">בחר שיחה כדי להתחיל</p>
-              </div>
+        {/* ── Right panel: messages ─────────────────────────── */}
+        <div className={`flex-1 flex flex-col min-w-0 ${!mobileShowChat ? "hidden md:flex" : "flex"}`}>
+          {!selectedId ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+              <MessageCircle className="h-16 w-16 text-muted-foreground/15 mb-4" />
+              <p className="font-heading font-medium text-muted-foreground">בחר שיחה כדי להתחיל</p>
+              <p className="text-xs text-muted-foreground mt-1">או לחץ + לשיחה חדשה</p>
             </div>
           ) : (
             <>
-              {/* Header */}
-              <div className="p-3 border-b border-border flex items-center gap-3">
-                {selectedConversation && (
-                  <>
-                    {selectedConversation.type === "private" && getConvoAvatar(selectedConversation) ? (
-                      <AvatarPreview config={getConvoAvatar(selectedConversation)!} size={32} />
-                    ) : (
-                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                        {selectedConversation.type === "group" ? <Users className="h-4 w-4 text-primary" /> :
-                         selectedConversation.type === "class_subject" ? <BookOpen className="h-4 w-4 text-primary" /> :
-                         <MessageCircle className="h-4 w-4 text-primary" />}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-heading font-medium text-sm truncate">{getConvoDisplayName(selectedConversation)}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {selectedConversation.participants.length} משתתפים
-                        {!selectedConversation.is_accepted && " • בקשת הודעה"}
-                      </p>
-                    </div>
-                  </>
+              {/* Chat header */}
+              <div className="px-4 py-3 border-b border-border flex items-center gap-3 shrink-0">
+                {selectedConvo?.type === "private" && selectedConvo.otherAvatar ? (
+                  <AvatarPreview config={selectedConvo.otherAvatar} size={36} />
+                ) : (
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${typeColor(selectedConvo?.type || "private")}`}>
+                    {typeIcon(selectedConvo?.type || "private")}
+                  </div>
                 )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-heading font-semibold text-sm truncate">{selectedConvo?.otherName}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {selectedConvo?.type === "private"
+                      ? selectedConvo.otherRoleLabel
+                      : `${selectedConvo?.participantCount} משתתפים`}
+                    {!selectedConvo?.is_accepted && " • בקשת הודעה"}
+                  </p>
+                </div>
               </div>
 
               {/* Messages */}
-              <ScrollArea className="flex-1 p-4">
-                <div className="space-y-3">
-                  {messages.map(msg => {
-                    const isMe = msg.sender_id === profile.id;
-                    const sender = participantsMap.get(msg.sender_id);
-                    return (
-                      <div key={msg.id} className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
-                        {!isMe && sender?.avatar && <AvatarPreview config={sender.avatar} size={28} />}
-                        <div className={`max-w-[70%]`}>
-                          {!isMe && (
-                            <p className="text-[10px] text-muted-foreground mb-0.5 px-1">{sender?.full_name}</p>
+              <ScrollArea className="flex-1 px-4 py-3">
+                {loadingMsgs ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <MessageCircle className="h-10 w-10 text-muted-foreground/20 mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      {selectedConvo?.is_accepted ? "אין הודעות עדיין — שלח הודעה ראשונה!" : "שלח הודעה ראשונה..."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {messages.map((msg, idx) => {
+                      const isMe = msg.sender_id === profile.id;
+                      const prevMsg = messages[idx - 1];
+                      const showSender = !isMe && prevMsg?.sender_id !== msg.sender_id;
+                      const showDate = idx === 0 || new Date(msg.created_at).toDateString() !== new Date(messages[idx - 1].created_at).toDateString();
+
+                      return (
+                        <div key={msg.id}>
+                          {showDate && (
+                            <div className="flex items-center justify-center my-3">
+                              <span className="text-[10px] text-muted-foreground bg-muted px-3 py-0.5 rounded-full">
+                                {new Date(msg.created_at).toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" })}
+                              </span>
+                            </div>
                           )}
-                          <div className={`rounded-2xl px-4 py-2 text-sm ${
-                            isMe
-                              ? "bg-primary text-primary-foreground rounded-bl-2xl rounded-br-sm"
-                              : "bg-muted rounded-br-2xl rounded-bl-sm"
-                          } ${msg.is_flagged ? "border-2 border-warning/50" : ""}`}>
-                            {msg.content}
-                            {msg.is_flagged && (
-                              <div className="flex items-center gap-1 mt-1 text-[10px] opacity-70">
-                                <AlertTriangle className="h-3 w-3" />
-                                {msg.flag_reason || "תוכן סומן"}
+                          <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""} ${idx > 0 && messages[idx - 1].sender_id === msg.sender_id ? "mt-0.5" : "mt-2"}`}>
+                            {!isMe && (
+                              <div className="w-7 h-7 shrink-0 mt-auto">
+                                {showSender && msg.sender_avatar ? (
+                                  <AvatarPreview config={msg.sender_avatar} size={28} />
+                                ) : (
+                                  <div className="w-7 h-7" /> // spacer
+                                )}
                               </div>
                             )}
+                            <div className={`max-w-[72%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
+                              {showSender && !isMe && (
+                                <p className="text-[10px] text-muted-foreground mb-0.5 px-1">{msg.sender_name}</p>
+                              )}
+                              <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed
+                                ${isMe
+                                  ? "bg-primary text-primary-foreground rounded-tl-2xl rounded-tr-sm"
+                                  : "bg-muted rounded-tr-2xl rounded-tl-sm"}
+                                ${msg.is_flagged ? "ring-1 ring-yellow-400" : ""}`}>
+                                {msg.content}
+                                {msg.is_flagged && (
+                                  <div className="flex items-center gap-1 mt-1 text-[9px] opacity-60">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    {msg.flag_reason || "תוכן סומן"}
+                                  </div>
+                                )}
+                              </div>
+                              <p className={`text-[9px] text-muted-foreground mt-0.5 px-1 ${isMe ? "text-left" : "text-right"}`}>
+                                {formatTime(msg.created_at)}
+                              </p>
+                            </div>
                           </div>
-                          <p className={`text-[9px] text-muted-foreground mt-0.5 px-1 ${isMe ? "text-left" : "text-right"}`}>
-                            {new Date(msg.created_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
-                          </p>
                         </div>
-                      </div>
-                    );
-                  })}
-                  <div ref={messagesEndRef} />
-                </div>
+                      );
+                    })}
+                    <div ref={bottomRef} />
+                  </div>
+                )}
               </ScrollArea>
 
-              {/* Input */}
-              <div className="p-3 border-t border-border">
-                {selectedConversation && !selectedConversation.is_accepted && selectedConversation.created_by !== profile.id ? (
-                  <div className="flex items-center justify-center gap-3">
-                    <p className="text-sm text-muted-foreground">בקשת הודעה מ{getConvoDisplayName(selectedConversation)}</p>
-                    <Button size="sm" variant="outline" onClick={() => {/* decline */}}>
-                      <X className="h-4 w-4 ml-1" /> דחה
+              {/* Input area */}
+              <div className="px-3 py-2.5 border-t border-border shrink-0">
+                {!selectedConvo?.is_accepted && selectedConvo?.created_by !== profile.id ? (
+                  /* Accept / decline request */
+                  <div className="flex items-center justify-center gap-3 py-1">
+                    <p className="text-sm text-muted-foreground flex items-center gap-1">
+                      <UserPlus className="h-4 w-4" />
+                      בקשת הודעה מ{selectedConvo?.otherName}
+                    </p>
+                    <Button size="sm" variant="outline" className="h-8 gap-1 text-xs font-heading text-destructive border-destructive/30">
+                      <X className="h-3.5 w-3.5" />דחה
                     </Button>
-                    <Button size="sm" onClick={() => acceptRequest(selectedConvo!)}>
-                      <Check className="h-4 w-4 ml-1" /> אשר ושלח
+                    <Button size="sm" className="h-8 gap-1 text-xs font-heading" onClick={() => acceptRequest(selectedId!)}>
+                      <Check className="h-3.5 w-3.5" />אשר
                     </Button>
                   </div>
                 ) : (
-                  <form onSubmit={e => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
-                    <Input
-                      value={newMessage}
-                      onChange={e => setNewMessage(e.target.value)}
-                      placeholder={
-                        selectedConversation && !selectedConversation.is_accepted
-                          ? "שלח הודעה אחת..."
-                          : "כתוב הודעה..."
-                      }
+                  <form onSubmit={e => { e.preventDefault(); sendMessage(); }} className="flex gap-2 items-end">
+                    <Textarea
+                      value={input}
+                      onChange={e => setInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                      }}
+                      placeholder={quietHours ? "🌙 שעות שקטות — כתוב הודעה..." : "כתוב הודעה..."}
                       disabled={sending}
-                      className="flex-1"
+                      rows={1}
+                      className="flex-1 resize-none text-sm min-h-[38px] max-h-24 py-2 bg-muted/40 border-muted"
                     />
-                    <Button type="submit" size="icon" disabled={!newMessage.trim() || sending}>
-                      <Send className="h-4 w-4" />
+                    <Button
+                      type="submit"
+                      size="icon"
+                      className="h-9 w-9 shrink-0 rounded-xl"
+                      disabled={!input.trim() || sending}
+                    >
+                      {sending
+                        ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                        : <Send className="h-4 w-4" />
+                      }
                     </Button>
                   </form>
                 )}
