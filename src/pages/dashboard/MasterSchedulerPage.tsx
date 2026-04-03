@@ -60,6 +60,7 @@ const MasterSchedulerPage = () => {
   // Form state
   const [form, setForm] = useState({
     title: "", description: "", event_type: "exam", subject: "",
+    grade: "", // Added grade
     event_date: "", start_time: "", end_time: "",
     requires_parent_approval: false, notes: "",
     weight: "20",
@@ -135,7 +136,7 @@ const MasterSchedulerPage = () => {
 
     const { error } = await supabase.from("grade_events").insert({
       school_id: profile.schoolId!,
-      grade: roleData.grade || (form as any).grade, // Fallback to form grade if subject coordinator
+      grade: roleData.grade || form.grade, // Use form.grade if coordinator grade is not set
       title: form.title,
       description: form.description || null,
       event_type: form.event_type,
@@ -155,7 +156,7 @@ const MasterSchedulerPage = () => {
     }
 
     toast({ title: "✅ האירוע נשלח לאישור הנהלה" });
-    setForm({ title: "", description: "", event_type: "exam", subject: "", event_date: "", start_time: "", end_time: "", requires_parent_approval: false, notes: "", weight: "20" });
+    setForm({ title: "", description: "", event_type: "exam", subject: "", grade: "", event_date: "", start_time: "", end_time: "", requires_parent_approval: false, notes: "", weight: "20" });
     setDialogOpen(false);
     loadEvents();
   };
@@ -195,10 +196,23 @@ const MasterSchedulerPage = () => {
                   </Select>
                 </div>
                 {form.event_type === "exam" && (
-                  <div>
-                    <label className="text-sm font-medium">מקצוע</label>
-                    <Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="מתמטיקה..." />
-                  </div>
+                  <>
+                    <div>
+                      <label className="text-sm font-medium">מקצוע</label>
+                      <Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="מתמטיקה..." />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">שכבת גיל</label>
+                      <Select value={form.grade} onValueChange={(v) => setForm({ ...form, grade: v })}>
+                        <SelectTrigger><SelectValue placeholder="בחר שכבה" /></SelectTrigger>
+                        <SelectContent>
+                          {["ז", "ח", "ט", "י", "יא", "יב"].map((g) => (
+                            <SelectItem key={g} value={g}>{g}'</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
                 )}
               </div>
               <div>
