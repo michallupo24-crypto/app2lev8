@@ -287,6 +287,61 @@ export type Database = {
           },
         ]
       }
+      chat_safety_events: {
+        Row: {
+          category: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          message_excerpt: string
+          school_id: string
+          severity: string
+          user_id: string
+        }
+        Insert: {
+          category: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          message_excerpt: string
+          school_id: string
+          severity?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          message_excerpt?: string
+          school_id?: string
+          severity?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_safety_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_safety_events_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_safety_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       classes: {
         Row: {
           class_number: number
@@ -1246,6 +1301,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          chat_presence?: string
           class_id: string | null
           created_at: string
           date_of_birth: string | null
@@ -1259,6 +1315,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          chat_presence?: string
           class_id?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -1272,6 +1329,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          chat_presence?: string
           class_id?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -1318,6 +1376,51 @@ export type Database = {
           name?: string
         }
         Relationships: []
+      }
+      scheduled_chat_messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          send_at: string
+          sender_id: string
+          sent_at: string | null
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          send_at: string
+          sender_id: string
+          sent_at?: string | null
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          send_at?: string
+          sender_id?: string
+          sent_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_chat_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       staff_meetings: {
         Row: {

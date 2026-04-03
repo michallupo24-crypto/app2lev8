@@ -1,14 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
   MessageCircle, Send, Search, Users, ArrowRight, Moon,
   AlertTriangle, BookOpen, UserPlus, Lock, Check, X, Plus,
+  School, HeartHandshake, UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
@@ -16,10 +24,18 @@ import type { UserProfile } from "@/hooks/useAuth";
 import type { AvatarConfig } from "@/components/avatar/AvatarStudio";
 
 /* ─── Types ───────────────────────────────────────────── */
+type ConversationType =
+  | "private"
+  | "group"
+  | "class_subject"
+  | "class_homeroom"
+  | "counseling"
+  | "parent_teacher";
+
 interface Conversation {
   id: string;
   title: string | null;
-  type: "private" | "group" | "class_subject";
+  type: ConversationType;
   subject: string | null;
   grade: string | null;
   is_accepted: boolean;
@@ -30,6 +46,7 @@ interface Conversation {
   otherName: string;
   otherAvatar: AvatarConfig | null;
   otherRoleLabel: string;
+  otherChatPresence: string | null;
   participantCount: number;
 }
 
@@ -57,6 +74,27 @@ const ROLE_LABELS: Record<string, string> = {
   grade_coordinator: "רכז/ת שכבה", counselor: "יועץ/ת",
   management: "הנהלה", system_admin: "מנהל/ת מערכת",
 };
+
+/** Staff who can publish availability to students/parents */
+const STAFF_PRESENCE_ROLES = new Set([
+  "educator", "professional_teacher", "subject_coordinator",
+  "grade_coordinator", "counselor", "management",
+]);
+
+const PRESENCE_LABELS: Record<string, string> = {
+  available: "פנוי/ה לשיחה",
+  in_lesson: "בשיעור",
+  resting: "במנוחה",
+};
+
+const CHANNEL_SECTIONS: { types: ConversationType[]; title: string }[] = [
+  { types: ["counseling"], title: "מרחב ייעוץ" },
+  { types: ["parent_teacher"], title: "הורה–מורה" },
+  { types: ["class_subject"], title: "מקצועות" },
+  { types: ["class_homeroom"], title: "חדר הכיתה" },
+  { types: ["group"], title: "קבוצות" },
+  { types: ["private"], title: "אישי" },
+];
 
 const FACE_TO_BODY: Record<string, string> = {
   round: "basic", oval: "basic", square: "wider", long: "taller",
@@ -90,12 +128,14 @@ const ChatPage = () => {
   const [quietHours, setQuietHours] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchUsers, setSearchUsers] = useState<SearchUser[]>([]);
+  const [listFilter, setListFilter] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
+  const [myPresence, setMyPresence] = useState<string>("available");
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const realtimeRef = useRef<any>(null);
 
-  const isParent = profile.roles.includes("parent");
+  const canSetPresence = profile.roles.some((r) => STAFF_PRESENCE_ROLES.has(r));
 
   /* ── Quiet hours ─────────────────────────────────────── */
   useEffect(() => {
@@ -115,6 +155,25 @@ const ChatPage = () => {
     const iv = setInterval(check, 60000);
     return () => clearInterval(iv);
   }, [profile.schoolId]);
+
+  /* ── Staff: own chat presence ───────────────────────── */
+  useEffect(() => {
+    if (!canSetPresence) return;
+    (async () => {
+      const { data } = await supabase.from("profiles").select("chat_presence").eq("id", profile.id).maybeSingle();
+      if (data?.chat_presence) setMyPresence(data.chat_presence);
+    })();
+  }, [canSetPresence, profile.id]);
+
+  const updateMyPresence = async (value: string) => {
+    setMyPresence(value);
+    const { error } = await supabase.from("profiles").update({ chat_presence: value }).eq("id", profile.id);
+    if (error) {
+      toast({ title: "שגיאה", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "עודכן", description: "מצב הנראות שלך בשיחות עודכן" });
+  };
 
   /* ── Load conversations (batched, no N+1) ───────────── */
   const loadConversations = useCallback(async () => {
@@ -143,7 +202,7 @@ const ChatPage = () => {
         .limit(convoIds.length * 3), // enough to get at least 1 per convo
       // All participants for all convos at once
       supabase.from("conversation_participants")
-        .select("conversation_id, user_id, profiles(full_name, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
+        .select("conversation_id, user_id, profiles(full_name, chat_presence, avatars(face_shape, eye_color, skin_color, hair_style, hair_color)), user_roles(role)")
         .in("conversation_id", convoIds),
       // Unread counts in one go
       supabase.from("messages")
@@ -189,10 +248,15 @@ const ChatPage = () => {
       const roleLabel = roles.map((r: string) => ROLE_LABELS[r] || r).join(", ");
       const lastName = otherParts.map((p: any) => (p.profiles as any)?.full_name || "").filter(Boolean).join(", ");
 
+      const otherPresence =
+        c.type === "private" && other?.profiles
+          ? String((other.profiles as { chat_presence?: string }).chat_presence || "available")
+          : null;
+
       return {
         id: c.id,
         title: c.title,
-        type: c.type,
+        type: c.type as ConversationType,
         subject: c.subject,
         grade: c.grade,
         is_accepted: c.is_accepted,
@@ -205,6 +269,7 @@ const ChatPage = () => {
         otherName: c.title || lastName || "שיחה",
         otherAvatar: c.type === "private" ? avatarFromRow(av) : null,
         otherRoleLabel: roleLabel,
+        otherChatPresence: otherPresence,
         participantCount: parts.length,
       };
     });
@@ -408,24 +473,61 @@ const ChatPage = () => {
     setInput("");
 
     try {
+      type ModResponse = {
+        blocked?: boolean;
+        block_reason?: string | null;
+        flag?: boolean;
+        flag_reason?: string | null;
+        safe?: boolean;
+        reason?: string | null;
+      };
+
       const { data: modResult } = await supabase.functions.invoke("chat-moderate", {
-        body: { message: content, sender_name: profile.fullName },
+        body: {
+          message: content,
+          sender_name: profile.fullName,
+          sender_id: profile.id,
+          conversation_id: selectedId,
+        },
       });
-      const isFlagged = modResult && !modResult.safe;
+
+      const mr = modResult as ModResponse | null;
+      const blocked = mr?.blocked === true;
+      const legacyUnsafe = Boolean(mr && mr.blocked !== true && mr.safe === false);
+      const flagged = !blocked && (mr?.flag === true || legacyUnsafe);
+      const flagReason = mr?.flag_reason || mr?.reason || null;
+
+      if (blocked) {
+        toast({
+          title: "לא נשלחה",
+          description:
+            mr?.block_reason ||
+            "ההודעה שכתבת לא עומדת בסטנדרט הקהילה שלנו. נסה/י לנסח מחדש בנימוס ובכבוד.",
+          variant: "destructive",
+        });
+        setInput(content);
+        return;
+      }
 
       await supabase.from("messages").insert({
         conversation_id: selectedId,
         sender_id: profile.id,
         content,
-        is_flagged: isFlagged || false,
-        flag_reason: isFlagged ? modResult.reason : null,
+        is_flagged: flagged,
+        flag_reason: flagged ? flagReason : null,
       });
 
       await supabase.from("conversations")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", selectedId);
 
-      if (isFlagged) toast({ title: "⚠️ הודעה סומנה", description: modResult.reason, variant: "destructive" });
+      if (flagged) {
+        toast({
+          title: "⚠️ הודעה נשלחה לבדיקה",
+          description: flagReason || "התוכן סומן לצוות",
+          variant: "destructive",
+        });
+      }
     } catch (err: any) {
       toast({ title: "שגיאה", description: err.message, variant: "destructive" });
       setInput(content);
@@ -452,6 +554,43 @@ const ChatPage = () => {
   const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
   const selectedConvo = conversations.find(c => c.id === selectedId);
 
+  const filteredConversations = useMemo(() => {
+    const q = listFilter.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      const name = c.otherName.toLowerCase();
+      const title = (c.title || "").toLowerCase();
+      const sub = (c.subject || "").toLowerCase();
+      const gr = (c.grade || "").toLowerCase();
+      return name.includes(q) || title.includes(q) || sub.includes(q) || gr.includes(q);
+    });
+  }, [conversations, listFilter]);
+
+  const groupedConversationSections = useMemo(() => {
+    const knownTypes = new Set(CHANNEL_SECTIONS.flatMap((s) => s.types));
+    const sections = CHANNEL_SECTIONS.map((sec) => ({
+      title: sec.title,
+      items: filteredConversations
+        .filter((c) => sec.types.includes(c.type))
+        .sort(
+          (a, b) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        ),
+    })).filter((s) => s.items.length > 0);
+
+    const other = filteredConversations.filter((c) => !knownTypes.has(c.type));
+    if (other.length > 0) {
+      sections.push({
+        title: "אחר",
+        items: other.sort(
+          (a, b) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        ),
+      });
+    }
+    return sections;
+  }, [filteredConversations]);
+
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
 
@@ -462,15 +601,23 @@ const ChatPage = () => {
     return d.toLocaleDateString("he-IL", { day: "numeric", month: "short" });
   };
 
-  const typeIcon = (type: string) =>
-    type === "group" ? <Users className="h-4 w-4" />
-      : type === "class_subject" ? <BookOpen className="h-4 w-4" />
-        : <MessageCircle className="h-4 w-4" />;
+  const typeIcon = (type: string) => {
+    if (type === "group") return <Users className="h-4 w-4" />;
+    if (type === "class_subject") return <BookOpen className="h-4 w-4" />;
+    if (type === "class_homeroom") return <School className="h-4 w-4" />;
+    if (type === "counseling") return <HeartHandshake className="h-4 w-4" />;
+    if (type === "parent_teacher") return <UserRound className="h-4 w-4" />;
+    return <MessageCircle className="h-4 w-4" />;
+  };
 
-  const typeColor = (type: string) =>
-    type === "group" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-      : type === "class_subject" ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
-        : "bg-muted text-muted-foreground";
+  const typeColor = (type: string) => {
+    if (type === "group") return "bg-blue-500/15 text-blue-600 dark:text-blue-400";
+    if (type === "class_subject") return "bg-purple-500/15 text-purple-600 dark:text-purple-400";
+    if (type === "class_homeroom") return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
+    if (type === "counseling") return "bg-rose-500/15 text-rose-700 dark:text-rose-400";
+    if (type === "parent_teacher") return "bg-amber-500/15 text-amber-800 dark:text-amber-400";
+    return "bg-muted text-muted-foreground";
+  };
 
   /* ── Render conversation row ──────────────────────────── */
   const ConvoRow = ({ c }: { c: Conversation }) => {
@@ -526,21 +673,47 @@ const ChatPage = () => {
   return (
     <div className="h-[calc(100vh-5rem)] md:h-[calc(100vh-2rem)] flex flex-col">
       {/* Page header */}
-      <div className="flex items-center justify-between mb-3 shrink-0">
-        <div className="flex items-center gap-2">
-          {mobileShowChat && (
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileShowChat(false)}>
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          )}
-          <h1 className="text-2xl font-heading font-bold">שיחות</h1>
-          {totalUnread > 0 && <Badge variant="destructive" className="text-xs">{totalUnread}</Badge>}
+      <div className="mb-3 shrink-0 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {mobileShowChat && (
+              <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileShowChat(false)}>
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
+            <h1 className="text-2xl font-heading font-bold">שיחות</h1>
+            {totalUnread > 0 && <Badge variant="destructive" className="text-xs">{totalUnread}</Badge>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canSetPresence && (
+              <Select value={myPresence} onValueChange={updateMyPresence}>
+                <SelectTrigger className="h-8 w-[148px] text-xs">
+                  <SelectValue placeholder="נראות" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="available">{PRESENCE_LABELS.available}</SelectItem>
+                  <SelectItem value="in_lesson">{PRESENCE_LABELS.in_lesson}</SelectItem>
+                  <SelectItem value="resting">{PRESENCE_LABELS.resting}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {quietHours && (
+              <Badge variant="secondary" className="gap-1 text-xs">
+                <Moon className="h-3 w-3" />שעות שקטות
+              </Badge>
+            )}
+          </div>
         </div>
-        {quietHours && (
-          <Badge variant="secondary" className="gap-1 text-xs">
-            <Moon className="h-3 w-3" />שעות שקטות
-          </Badge>
-        )}
+        <details className="text-xs text-muted-foreground max-w-3xl leading-relaxed">
+          <summary className="cursor-pointer select-none font-medium text-foreground/85">
+            מבנה מרחב השיחות
+          </summary>
+          <p className="mt-2 pe-2">
+            השיחות מסודרות לפי הקשר פדגוגי: מקצועות, חדר כיתה, ייעוץ, ערוץ הורה–מורה ושיחות אישיות.
+            צוות יכול לסמן נראות (בשיעור / במנוחה). תוכן פוגען נחסם לפני שליחה; מצוקה מזוהה בדיסקרטיות לצוות טיפולי.
+            Live Engagement (אנונימי בסקרים), תזמון הודעות וגיימיפיקציית קהילה — בשלבי הרחבה.
+          </p>
+        </details>
       </div>
 
       <div className="flex flex-1 min-h-0 rounded-2xl border border-border overflow-hidden bg-card">
@@ -553,15 +726,19 @@ const ChatPage = () => {
             <div className="relative flex-1">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="חיפוש שיחות..."
+                placeholder={showNewChat ? "חיפוש אנשים..." : "חיפוש ברשימת השיחות..."}
                 className="pr-9 h-9 text-sm bg-muted/40 border-0 focus-visible:ring-1"
-                value={showNewChat ? "" : ""}
-                onChange={() => { }}
-                onFocus={() => setShowNewChat(true)}
-                readOnly={!showNewChat}
+                value={showNewChat ? searchQuery : listFilter}
+                onChange={(e) => (showNewChat ? setSearchQuery(e.target.value) : setListFilter(e.target.value))}
               />
             </div>
-            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => setShowNewChat(s => !s)}>
+            <Button
+              size="icon"
+              variant={showNewChat ? "secondary" : "ghost"}
+              className="h-9 w-9 shrink-0"
+              onClick={() => setShowNewChat((s) => !s)}
+              title="שיחה חדשה"
+            >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
@@ -644,8 +821,22 @@ const ChatPage = () => {
                 <p className="font-heading font-medium text-muted-foreground">אין שיחות עדיין</p>
                 <p className="text-xs text-muted-foreground mt-1">לחץ + כדי להתחיל שיחה חדשה</p>
               </div>
+            ) : groupedConversationSections.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                <Search className="h-10 w-10 text-muted-foreground/20 mb-2" />
+                <p className="text-sm text-muted-foreground">לא נמצאו שיחות לפי החיפוש</p>
+              </div>
             ) : (
-              conversations.map(c => <ConvoRow key={c.id} c={c} />)
+              groupedConversationSections.map((sec) => (
+                <div key={sec.title}>
+                  <div className="px-4 py-2 text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground bg-muted/25 border-b border-border/40">
+                    {sec.title}
+                  </div>
+                  {sec.items.map((c) => (
+                    <ConvoRow key={c.id} c={c} />
+                  ))}
+                </div>
+              ))
             )}
           </ScrollArea>
         </div>
@@ -675,6 +866,12 @@ const ChatPage = () => {
                     {selectedConvo?.type === "private"
                       ? selectedConvo.otherRoleLabel
                       : `${selectedConvo?.participantCount} משתתפים`}
+                    {selectedConvo?.type === "private" && selectedConvo.otherChatPresence && (
+                      <span>
+                        {" · "}
+                        {PRESENCE_LABELS[selectedConvo.otherChatPresence] || selectedConvo.otherChatPresence}
+                      </span>
+                    )}
                     {!selectedConvo?.is_accepted && " • בקשת הודעה"}
                   </p>
                 </div>
