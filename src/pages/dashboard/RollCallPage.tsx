@@ -329,9 +329,110 @@ const RollCallPage = () => {
     setStudents(prev => prev.map(s => ({ ...s, status: s.status || "present" })));
   };
 
+  // ── Helper: find or create a private conversation between two users ──────
+  const getOrCreateConversation = async (otherUserId: string): Promise<string | null> => {
+    try {
+      // Look for an existing private conversation between teacher and parent
+      const { data: myConvs } = await supabase
+        .from("conversation_participants")
+        .select("conversation_id")
+        .eq("user_id", profile.id);
+
+      if (myConvs && myConvs.length > 0) {
+        const myConvIds = myConvs.map((c: any) => c.conversation_id);
+        const { data: otherPart } = await supabase
+          .from("conversation_participants")
+          .select("conversation_id, conversations(type)")
+          .eq("user_id", otherUserId)
+          .in("conversation_id", myConvIds);
+
+        const existingPrivate = (otherPart || []).find(
+          (p: any) => p.conversations?.type === "private"
+        );
+        if (existingPrivate) return existingPrivate.conversation_id;
+      }
+
+      // Create new private conversation
+      const { data: newConv } = await supabase
+        .from("conversations")
+        .insert({
+          school_id: profile.schoolId!,
+          type: "private",
+          created_by: profile.id,
+        })
+        .select("id")
+        .single();
+
+      if (!newConv) return null;
+
+      await supabase.from("conversation_participants").insert([
+        { conversation_id: newConv.id, user_id: profile.id },
+        { conversation_id: newConv.id, user_id: otherUserId },
+      ]);
+
+      return newConv.id;
+    } catch {
+      return null;
+    }
+  };
+
+  // ── Notify parents of absent / late students ──────────────────────────────
+  const notifyParentsOfAbsences = async (
+    absentStudents: StudentCard[],
+    lateStudents: StudentCard[],
+    className: string
+  ) => {
+    const studentsToNotify = [
+      ...absentStudents.map(s => ({ student: s, isLate: false })),
+      ...lateStudents.map(s => ({ student: s, isLate: true })),
+    ];
+
+    if (studentsToNotify.length === 0) return;
+
+    // Fetch parent links for all these students in one query
+    const studentIds = studentsToNotify.map(({ student }) => student.id);
+    const { data: parentLinks } = await supabase
+      .from("parent_student")
+      .select("parent_id, student_id")
+      .in("student_id", studentIds);
+
+    if (!parentLinks || parentLinks.length === 0) return;
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = now.toLocaleDateString("he-IL", { day: "numeric", month: "long" });
+
+    for (const { student, isLate } of studentsToNotify) {
+      const parents = parentLinks.filter((l: any) => l.student_id === student.id);
+      for (const link of parents) {
+        try {
+          const convId = await getOrCreateConversation(link.parent_id);
+          if (!convId) continue;
+
+          const msg = isLate
+            ? `📢 שים לב — ${student.name} איחר/ה לשיעור ב${className} (${dateStr}, ${timeStr}).`
+            : `📢 הודעה חשובה — ${student.name} לא הגיע/ה לשיעור ב${className} היום (${dateStr}).` +
+              `\n\nאם מדובר בחיסור מוצדק, ניתן להגיש הצדקה דרך האפליקציה.`;
+
+          await supabase.from("messages").insert({
+            conversation_id: convId,
+            sender_id: profile.id,
+            content: msg,
+          });
+        } catch { /* best effort — don't fail the whole submit */ }
+      }
+    }
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      const selectedClassData = classes.find(c => c.id === selectedClass);
+      const className = selectedClassData
+        ? `כיתה ${selectedClassData.grade}'${selectedClassData.number}`
+        : "הכיתה";
+
+      // 1. Create lesson record
       const { data: lesson, error: lessonError } = await supabase.from("lessons").insert({
         teacher_id: profile.id,
         class_id: selectedClass,
@@ -342,6 +443,7 @@ const RollCallPage = () => {
 
       if (lessonError) throw lessonError;
 
+      // 2. Save attendance rows
       const attendanceRows = students
         .filter(s => s.status)
         .map(s => ({
@@ -355,6 +457,7 @@ const RollCallPage = () => {
         if (attError) throw attError;
       }
 
+      // 3. Save lesson notes
       const noteRows = students.flatMap(s =>
         s.notes.map(n => ({
           lesson_id: lesson.id,
@@ -369,41 +472,45 @@ const RollCallPage = () => {
         if (noteError) throw noteError;
       }
 
-      // Send birthday greetings to class chat for birthday students
+      // 4. Notify parents of absent / late students (best-effort, runs in background)
+      const absentStudents = students.filter(s => s.status === "absent");
+      const lateStudents = students.filter(s => s.status === "late");
+      notifyParentsOfAbsences(absentStudents, lateStudents, className).catch(() => {});
+
+      // 5. Birthday greetings
       const birthdayStudents = students.filter(s => s.isBirthday);
       if (birthdayStudents.length > 0) {
         for (const bs of birthdayStudents) {
-          // Try to send birthday message to class group chat
           try {
-            const selectedClassData = classes.find(c => c.id === selectedClass);
-            if (selectedClassData) {
-              const { data: classConvo } = await supabase
-                .from("conversations")
-                .select("id")
-                .eq("type", "group")
-                .eq("title", `כיתה ${selectedClassData.grade}'${selectedClassData.number}`)
-                .limit(1)
-                .single();
-              
-              if (classConvo) {
-                await supabase.from("messages").insert({
-                  conversation_id: classConvo.id,
-                  sender_id: profile.id,
-                  content: `🎂🎈 מזל טוב ל${bs.name}! יום הולדת שמח! 🎉`,
-                });
-              }
+            const { data: classConvo } = await supabase
+              .from("conversations")
+              .select("id")
+              .eq("type", "group")
+              .eq("title", className)
+              .limit(1)
+              .single();
+
+            if (classConvo) {
+              await supabase.from("messages").insert({
+                conversation_id: classConvo.id,
+                sender_id: profile.id,
+                content: `🎂🎈 מזל טוב ל${bs.name}! יום הולדת שמח! 🎉`,
+              });
             }
-          } catch { /* ignore if chat message fails */ }
+          } catch { /* ignore */ }
         }
       }
 
-      const absentCount = students.filter(s => s.status === "absent").length;
-      const lateCount = students.filter(s => s.status === "late").length;
+      const absentCount = absentStudents.length;
+      const lateCount = lateStudents.length;
       const noteCount = noteRows.length;
+      const notifiedCount = absentCount + lateCount;
 
       toast({
         title: "הקראת שמות נשמרה! ✅",
-        description: `${absentCount} חיסורים, ${lateCount} איחורים, ${noteCount} הערות`,
+        description: notifiedCount > 0
+          ? `${absentCount} חיסורים, ${lateCount} איחורים — הודעה נשלחה להורים${noteCount > 0 ? `, ${noteCount} הערות` : ""}`
+          : `${noteCount} הערות — כל התלמידים נוכחים`,
       });
 
       setStudents(prev => prev.map(s => ({ ...s, status: null, notes: [] })));
