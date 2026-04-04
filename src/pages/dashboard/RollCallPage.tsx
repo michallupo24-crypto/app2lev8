@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ClipboardList, Check, X, Clock, Send, Undo2, Cake, MoreHorizontal } from "lucide-react";
+import { ClipboardList, Check, X, Clock, Send, Undo2, Cake, MoreHorizontal, LayoutGrid, List } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +18,8 @@ import type { AvatarConfig } from "@/components/avatar/AvatarStudio";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSmartSeat } from "@/hooks/useSmartSeat";
+import { ClassroomGrid } from "@/components/smartseat/ClassroomGrid";
 
 interface StudentCard {
   id: string;
@@ -41,7 +43,6 @@ const NOTE_CATEGORIES = [
 
 const SWIPE_THRESHOLD = 60;
 
-// Swipeable student row component
 const SwipeableStudentRow = ({
   student,
   isMobile,
@@ -50,14 +51,13 @@ const SwipeableStudentRow = ({
 }: {
   student: StudentCard;
   isMobile: boolean;
-  onSwipe: (id: string, direction: "left" | "right") => void;
+  onSwipe: (id: string, direction: "left" | "right" | "late") => void;
   onLongPress: (id: string) => void;
 }) => {
   const x = useMotionValue(0);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDragging = useRef(false);
 
-  // Smooth color transitions based on drag position
   const leftBgOpacity = useTransform(x, [-150, -SWIPE_THRESHOLD, 0], [1, 0.6, 0]);
   const rightBgOpacity = useTransform(x, [0, SWIPE_THRESHOLD, 150], [0, 0.6, 1]);
   const leftScale = useTransform(x, [-150, -SWIPE_THRESHOLD, 0], [1.1, 0.9, 0.5]);
@@ -67,9 +67,9 @@ const SwipeableStudentRow = ({
   const handleDragEnd = (_: any, info: PanInfo) => {
     isDragging.current = false;
     if (info.offset.x < -SWIPE_THRESHOLD) {
-      onSwipe(student.id, "left"); // Present
+      onSwipe(student.id, "left");
     } else if (info.offset.x > SWIPE_THRESHOLD) {
-      onSwipe(student.id, "right"); // Absent
+      onSwipe(student.id, "right");
     }
   };
 
@@ -94,7 +94,6 @@ const SwipeableStudentRow = ({
 
   return (
     <div className="relative overflow-hidden rounded-2xl">
-      {/* Swipe background - present (left swipe) */}
       <motion.div
         className="absolute inset-0 flex items-center justify-start pr-5 rounded-2xl bg-gradient-to-l from-transparent to-success/30"
         style={{ opacity: leftBgOpacity }}
@@ -107,7 +106,6 @@ const SwipeableStudentRow = ({
         </motion.div>
       </motion.div>
 
-      {/* Swipe background - absent (right swipe) */}
       <motion.div
         className="absolute inset-0 flex items-center justify-end pl-5 rounded-2xl bg-gradient-to-r from-transparent to-destructive/30"
         style={{ opacity: rightBgOpacity }}
@@ -130,27 +128,14 @@ const SwipeableStudentRow = ({
         style={{ x, scale: cardScale }}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        onTouchMove={() => { if (longPressRef.current) clearTimeout(longPressRef.current); }}
         className={`relative z-10 flex items-center gap-3 p-3 rounded-2xl border-2 backdrop-blur-sm transition-colors duration-300 ${statusConfig.bg} ${student.status ? `ring-1 ${statusConfig.ring}` : ""}`}
-        whileTap={isMobile ? { scale: 0.98 } : undefined}
       >
-        {/* Avatar */}
         <div className="relative shrink-0">
           {student.avatar ? (
             <AvatarPreview config={student.avatar} size={44} />
           ) : (
             <div className="w-11 h-11 rounded-2xl bg-muted flex items-center justify-center text-lg">👤</div>
           )}
-          {student.isBirthday && (
-            <motion.span
-              animate={{ y: [0, -4, 0] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-              className="absolute -top-2 -left-1 text-lg"
-            >
-              🎈
-            </motion.span>
-          )}
-          {/* Status indicator dot */}
           {student.status && (
             <motion.div
               initial={{ scale: 0 }}
@@ -166,65 +151,21 @@ const SwipeableStudentRow = ({
           )}
         </div>
 
-        {/* Name & notes */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="font-heading font-bold text-sm truncate">{student.name}</p>
-            {student.isBirthday && <Cake className="h-3.5 w-3.5 text-secondary shrink-0" />}
-          </div>
-          {student.notes.length > 0 && (
-            <div className="flex gap-1 mt-0.5">
-              {student.notes.map((n, i) => {
-                const cat = NOTE_CATEGORIES.find(c => c.value === n.category);
-                return <span key={i} className="text-xs">{cat?.emoji}</span>;
-              })}
-            </div>
-          )}
+        <div className="flex-1 min-w-0 text-right">
+          <p className="font-heading font-bold text-sm truncate">{student.name}</p>
         </div>
 
-        {/* Desktop buttons */}
         {!isMobile && (
           <div className="flex gap-1.5 shrink-0">
-            <Button
-              size="sm"
-              variant={student.status === "present" ? "default" : "outline"}
-              className={`text-xs font-heading px-3 rounded-xl transition-all ${student.status === "present" ? "bg-success hover:bg-success/90 text-success-foreground shadow-sm" : ""}`}
-              onClick={() => onSwipe(student.id, "left")}
-            >
+            <Button size="sm" variant={student.status === "present" ? "default" : "outline"} className={`text-xs font-heading ${student.status === "present" ? "bg-success hover:bg-success/90" : ""}`} onClick={() => onSwipe(student.id, "left")}>
               <Check className="h-3.5 w-3.5 mr-1" /> נוכח
             </Button>
-            <Button
-              size="sm"
-              variant={student.status === "absent" ? "default" : "outline"}
-              className={`text-xs font-heading px-3 rounded-xl transition-all ${student.status === "absent" ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-sm" : ""}`}
-              onClick={() => onSwipe(student.id, "right")}
-            >
+            <Button size="sm" variant={student.status === "absent" ? "default" : "outline"} className={`text-xs font-heading ${student.status === "absent" ? "bg-destructive hover:bg-destructive/90" : ""}`} onClick={() => onSwipe(student.id, "right")}>
               <X className="h-3.5 w-3.5 mr-1" /> חסר
             </Button>
-            <Button
-              size="sm"
-              variant={student.status === "late" ? "default" : "outline"}
-              className={`text-xs font-heading px-3 rounded-xl transition-all ${student.status === "late" ? "bg-warning hover:bg-warning/90 text-warning-foreground shadow-sm" : ""}`}
-              onClick={() => onSwipe(student.id, "late" as any)}
-            >
+            <Button size="sm" variant={student.status === "late" ? "default" : "outline"} className={`text-xs font-heading ${student.status === "late" ? "bg-warning hover:bg-warning/90" : ""}`} onClick={() => onSwipe(student.id, "late")}>
               <Clock className="h-3.5 w-3.5 mr-1" /> איחור
             </Button>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full border border-transparent hover:border-border">
-                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 font-heading">
-                {NOTE_CATEGORIES.map(cat => (
-                  <DropdownMenuItem key={cat.value} onClick={() => onLongPress(student.id)} className="cursor-pointer flex items-center gap-2">
-                    <span>{cat.emoji}</span>
-                    <span>{cat.label}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         )}
       </motion.div>
@@ -241,7 +182,7 @@ const RollCallPage = () => {
   const [selectedClass, setSelectedClass] = useState("");
   const [classes, setClasses] = useState<{ id: string; grade: string; number: number }[]>([]);
   const [topic, setTopic] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [longPressStudentId, setLongPressStudentId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -249,7 +190,6 @@ const RollCallPage = () => {
       const { data } = await supabase.from("teacher_classes")
         .select("class_id, classes(id, grade, class_number)")
         .eq("user_id", profile.id);
-
       if (data) {
         const cls = data.map((d: any) => ({
           id: d.classes.id,
@@ -259,7 +199,6 @@ const RollCallPage = () => {
         setClasses(cls);
         if (cls.length > 0) setSelectedClass(cls[0].id);
       }
-      setLoading(false);
     };
     loadClasses();
   }, [profile.id]);
@@ -268,446 +207,78 @@ const RollCallPage = () => {
     if (!selectedClass) return;
     const loadStudents = async () => {
       setLoading(true);
-      const { data: profilesData } = await supabase.from("profiles")
-        .select("id, full_name")
+      const { data } = await supabase.from("profiles")
+        .select("id, full_name, avatar")
         .eq("class_id", selectedClass)
-        .eq("is_approved", true)
-        .order("full_name", { ascending: true });
-
-      if (!profilesData || profilesData.length === 0) {
-        setStudents([]);
-        setLoading(false);
-        return;
+        .eq("is_approved", true);
+      if (data) {
+        setStudents(data.map(p => ({ id: p.id, name: p.full_name, avatar: p.avatar, status: null, notes: [], isBirthday: false })));
       }
-
-      const studentIds = profilesData.map((p: any) => p.id);
-      const [avatarsRes, birthdaysRes] = await Promise.all([
-        supabase.from("avatars").select("*").in("user_id", studentIds),
-        supabase.from("profiles").select("id, date_of_birth" as any).in("id", studentIds),
-      ]);
-
-      const avatarMap = new Map((avatarsRes.data || []).map((a: any) => [a.user_id, {
-        body_type: a.face_shape || "basic",
-        eye_color: a.eye_color || "brown",
-        skin: a.skin_color || "#FDDBB4",
-        hair_style: a.hair_style || "boy",
-        hair_color: a.hair_color || "#2C1A0E",
-      }]));
-
-      const today = new Date();
-      const birthdaySet = new Set<string>();
-      if (birthdaysRes.data) {
-        for (const p of birthdaysRes.data as any[]) {
-          if (p.date_of_birth) {
-            const dob = new Date(p.date_of_birth);
-            if (dob.getMonth() === today.getMonth() && dob.getDate() === today.getDate()) {
-              birthdaySet.add(p.id);
-            }
-          }
-        }
-      }
-
-      setStudents(profilesData.map((p: any) => ({
-        id: p.id,
-        name: p.full_name,
-        avatar: avatarMap.get(p.id) || null,
-        status: null,
-        notes: [],
-        isBirthday: birthdaySet.has(p.id),
-      })));
       setLoading(false);
     };
     loadStudents();
   }, [selectedClass]);
 
-  const handleSwipe = useCallback((studentId: string, direction: "left" | "right" | "late") => {
-    const newStatus = direction === "left" ? "present" : direction === "right" ? "absent" : "late";
-    setStudents(prev => prev.map(s =>
-      s.id === studentId ? { ...s, status: s.status === newStatus ? null : newStatus as any } : s
-    ));
+  const ss = useSmartSeat(selectedClass);
+
+  const handleSwipe = useCallback((id: string, direction: "left" | "right" | "late") => {
+    const status = direction === "left" ? "present" : direction === "right" ? "absent" : "late";
+    setStudents(prev => prev.map(s => s.id === id ? { ...s, status: s.status === status ? null : status } : s));
   }, []);
 
-  const addNote = useCallback((studentId: string, category: string) => {
-    const student = students.find(s => s.id === studentId);
-    if (student?.status === "absent") {
-      toast({ title: "לא ניתן להוסיף הערה לתלמיד שחסר", variant: "destructive" });
-      return;
-    }
-
-    setStudents(prev => prev.map(s => {
-      if (s.id !== studentId) return s;
-      const hasNote = s.notes.some(n => n.category === category);
-      return {
-        ...s,
-        notes: hasNote
-          ? s.notes.filter(n => n.category !== category)
-          : [...s.notes, { category }],
-      };
-    }));
-    setLongPressStudentId(null);
-  }, [students, toast]);
-
-  const markAllPresent = () => {
-    setStudents(prev => prev.map(s => ({ ...s, status: s.status || "present" })));
-  };
-
-  // ── Helper: find or create a private conversation between two users ──────
-  const getOrCreateConversation = async (otherUserId: string): Promise<string | null> => {
-    try {
-      // Look for an existing private conversation between teacher and parent
-      const { data: myConvs } = await supabase
-        .from("conversation_participants")
-        .select("conversation_id")
-        .eq("user_id", profile.id);
-
-      if (myConvs && myConvs.length > 0) {
-        const myConvIds = myConvs.map((c: any) => c.conversation_id);
-        const { data: otherPart } = await supabase
-          .from("conversation_participants")
-          .select("conversation_id, conversations(type)")
-          .eq("user_id", otherUserId)
-          .in("conversation_id", myConvIds);
-
-        const existingPrivate = (otherPart || []).find(
-          (p: any) => p.conversations?.type === "private"
-        );
-        if (existingPrivate) return existingPrivate.conversation_id;
-      }
-
-      // Create new private conversation
-      const { data: newConv } = await supabase
-        .from("conversations")
-        .insert({
-          school_id: profile.schoolId!,
-          type: "private",
-          created_by: profile.id,
-        })
-        .select("id")
-        .single();
-
-      if (!newConv) return null;
-
-      await supabase.from("conversation_participants").insert([
-        { conversation_id: newConv.id, user_id: profile.id },
-        { conversation_id: newConv.id, user_id: otherUserId },
-      ]);
-
-      return newConv.id;
-    } catch {
-      return null;
-    }
-  };
-
-  // ── Notify parents of absent / late students ──────────────────────────────
-  const notifyParentsOfAbsences = async (
-    absentStudents: StudentCard[],
-    lateStudents: StudentCard[],
-    className: string
-  ) => {
-    const studentsToNotify = [
-      ...absentStudents.map(s => ({ student: s, isLate: false })),
-      ...lateStudents.map(s => ({ student: s, isLate: true })),
-    ];
-
-    if (studentsToNotify.length === 0) return;
-
-    // Fetch parent links for all these students in one query
-    const studentIds = studentsToNotify.map(({ student }) => student.id);
-    const { data: parentLinks } = await supabase
-      .from("parent_student")
-      .select("parent_id, student_id")
-      .in("student_id", studentIds);
-
-    if (!parentLinks || parentLinks.length === 0) return;
-
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
-    const dateStr = now.toLocaleDateString("he-IL", { day: "numeric", month: "long" });
-
-    for (const { student, isLate } of studentsToNotify) {
-      const parents = parentLinks.filter((l: any) => l.student_id === student.id);
-      for (const link of parents) {
-        try {
-          const convId = await getOrCreateConversation(link.parent_id);
-          if (!convId) continue;
-
-          const msg = isLate
-            ? `📢 שים לב — ${student.name} איחר/ה לשיעור ב${className} (${dateStr}, ${timeStr}).`
-            : `📢 הודעה חשובה — ${student.name} לא הגיע/ה לשיעור ב${className} היום (${dateStr}).` +
-              `\n\nאם מדובר בחיסור מוצדק, ניתן להגיש הצדקה דרך האפליקציה.`;
-
-          await supabase.from("messages").insert({
-            conversation_id: convId,
-            sender_id: profile.id,
-            content: msg,
-          });
-        } catch { /* best effort — don't fail the whole submit */ }
-      }
-    }
-  };
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      const selectedClassData = classes.find(c => c.id === selectedClass);
-      const className = selectedClassData
-        ? `כיתה ${selectedClassData.grade}'${selectedClassData.number}`
-        : "הכיתה";
-
-      // 1. Create lesson record
-      const { data: lesson, error: lessonError } = await supabase.from("lessons").insert({
-        teacher_id: profile.id,
-        class_id: selectedClass,
-        subject: profile.roles.includes("educator") ? "חינוך" : "מקצוע",
-        topic: topic || null,
-        school_id: profile.schoolId!,
-      }).select().single();
-
-      if (lessonError) throw lessonError;
-
-      // 2. Save attendance rows
-      const attendanceRows = students
-        .filter(s => s.status)
-        .map(s => ({
-          lesson_id: lesson.id,
-          student_id: s.id,
-          status: s.status as "present" | "absent" | "late" | "excused",
-        }));
-
-      if (attendanceRows.length > 0) {
-        const { error: attError } = await supabase.from("attendance").insert(attendanceRows);
-        if (attError) throw attError;
-      }
-
-      // 3. Save lesson notes
-      const noteRows = students.flatMap(s =>
-        s.notes.map(n => ({
-          lesson_id: lesson.id,
-          student_id: s.id,
-          category: n.category as any,
-          note: n.note || null,
-        }))
-      );
-
-      if (noteRows.length > 0) {
-        const { error: noteError } = await supabase.from("lesson_notes").insert(noteRows);
-        if (noteError) throw noteError;
-      }
-
-      // 4. Notify parents of absent / late students (best-effort, runs in background)
-      const absentStudents = students.filter(s => s.status === "absent");
-      const lateStudents = students.filter(s => s.status === "late");
-      notifyParentsOfAbsences(absentStudents, lateStudents, className).catch(() => {});
-
-      // 5. Birthday greetings
-      const birthdayStudents = students.filter(s => s.isBirthday);
-      if (birthdayStudents.length > 0) {
-        for (const bs of birthdayStudents) {
-          try {
-            const { data: classConvo } = await supabase
-              .from("conversations")
-              .select("id")
-              .eq("type", "group")
-              .eq("title", className)
-              .limit(1)
-              .single();
-
-            if (classConvo) {
-              await supabase.from("messages").insert({
-                conversation_id: classConvo.id,
-                sender_id: profile.id,
-                content: `🎂🎈 מזל טוב ל${bs.name}! יום הולדת שמח! 🎉`,
-              });
-            }
-          } catch { /* ignore */ }
-        }
-      }
-
-      const absentCount = absentStudents.length;
-      const lateCount = lateStudents.length;
-      const noteCount = noteRows.length;
-      const notifiedCount = absentCount + lateCount;
-
-      toast({
-        title: "הקראת שמות נשמרה! ✅",
-        description: notifiedCount > 0
-          ? `${absentCount} חיסורים, ${lateCount} איחורים — הודעה נשלחה להורים${noteCount > 0 ? `, ${noteCount} הערות` : ""}`
-          : `${noteCount} הערות — כל התלמידים נוכחים`,
-      });
-
-      setStudents(prev => prev.map(s => ({ ...s, status: null, notes: [] })));
-      setTopic("");
-    } catch (error: any) {
-      toast({ title: "שגיאה בשמירה", description: error.message, variant: "destructive" });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const absentCount = students.filter(s => s.status === "absent").length;
-  const lateCount = students.filter(s => s.status === "late").length;
-  const presentCount = students.filter(s => s.status === "present").length;
   const unmarkedCount = students.filter(s => !s.status).length;
-  const birthdayCount = students.filter(s => s.isBirthday).length;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
-            <ClipboardList className="h-7 w-7 text-primary" />
-            הקראת שמות
-          </h1>
-          <p className="text-sm text-muted-foreground font-body mt-1">
-            {isMobile ? "החלק ימינה לחיסור, שמאלה לנוכח" : "סמן נוכחות, איחורים והערות"}
-          </p>
-        </div>
-        <Select value={selectedClass} onValueChange={setSelectedClass}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="בחר כיתה" />
-          </SelectTrigger>
-          <SelectContent>
-            {classes.map(c => (
-              <SelectItem key={c.id} value={c.id}>{c.grade}'{c.number}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Birthday banner */}
-      {birthdayCount > 0 && (
-        <Card className="border-secondary/30 bg-gradient-to-r from-secondary/10 to-primary/5">
-          <CardContent className="py-3 flex items-center gap-3">
-            <Cake className="h-5 w-5 text-secondary shrink-0" />
-            <p className="font-heading font-medium text-sm">
-              🎈 יום הולדת היום: {students.filter(s => s.isBirthday).map(s => s.name).join(", ")}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Summary bar */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <Badge variant="outline" className="gap-1 py-1 px-3 bg-success/5">
-          <Check className="h-3 w-3 text-success" /> {presentCount}
-        </Badge>
-        <Badge variant="outline" className="gap-1 py-1 px-3 bg-destructive/5">
-          <X className="h-3 w-3 text-destructive" /> {absentCount}
-        </Badge>
-        <Badge variant="outline" className="gap-1 py-1 px-3 bg-warning/5">
-          <Clock className="h-3 w-3 text-warning" /> {lateCount}
-        </Badge>
-        {unmarkedCount > 0 && (
-          <Badge variant="outline" className="gap-1 py-1 px-3 text-muted-foreground">
-            {unmarkedCount} טרם
-          </Badge>
-        )}
-        <Button variant="outline" size="sm" className="mr-auto font-heading text-xs" onClick={markAllPresent}>
-          ✓ הכל נוכחים
-        </Button>
-      </div>
-
-      {/* Student List */}
-      {loading ? (
-        <div className="text-center py-12">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-        </div>
-      ) : students.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground font-body">אין תלמידים בכיתה זו</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {students.map(student => (
-            <SwipeableStudentRow
-              key={student.id}
-              student={student}
-              isMobile={isMobile}
-              onSwipe={handleSwipe}
-              onLongPress={(id) => setLongPressStudentId(id)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Long Press Note Popup */}
-      {longPressStudentId && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-4"
-          onClick={() => setLongPressStudentId(null)}
-        >
-          <motion.div
-            initial={{ y: 100 }}
-            animate={{ y: 0 }}
-            className="bg-card rounded-2xl p-4 w-full max-w-sm shadow-2xl border border-border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-heading font-bold text-base mb-3 text-center">
-              {students.find(s => s.id === longPressStudentId)?.name} - הוספת הערה
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {NOTE_CATEGORIES.map(cat => {
-                const hasNote = students.find(s => s.id === longPressStudentId)?.notes.some(n => n.category === cat.value);
-                return (
-                  <button
-                    key={cat.value}
-                    className={`flex items-center gap-2 p-3 rounded-xl border text-sm font-heading transition-all ${
-                      hasNote ? cat.color + " font-bold" : "bg-muted/30 border-border hover:bg-muted/60"
-                    }`}
-                    onClick={() => addNote(longPressStudentId, cat.value)}
-                  >
-                    <span className="text-lg">{cat.emoji}</span>
-                    <span>{cat.label}</span>
-                  </button>
-                );
-              })}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-heading font-bold">הקראת שמות</h1>
+        <div className="flex gap-2 items-center">
+            <div className="flex bg-muted rounded-lg p-1">
+                <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("list")} className="h-8 shadow-none"><List className="h-4 w-4 mr-2" /> רשימה</Button>
+                <Button variant={viewMode === "map" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("map")} className="h-8 shadow-none"><LayoutGrid className="h-4 w-4 mr-2" /> מפה</Button>
             </div>
-            {/* Late button in popup too */}
-            <Button
-              variant="outline"
-              className="w-full mt-3 font-heading gap-2"
-              onClick={() => {
-                handleSwipe(longPressStudentId, "late" as any);
-                setLongPressStudentId(null);
-              }}
-            >
-              <Clock className="h-4 w-4 text-warning" /> סמן כאיחור
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full mt-1 text-muted-foreground font-heading"
-              onClick={() => setLongPressStudentId(null)}
-            >
-              סגור
-            </Button>
-          </motion.div>
-        </motion.div>
-      )}
+            <Select value={selectedClass} onValueChange={setSelectedClass}>
+                <SelectTrigger className="w-32 h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>{classes.map(c => <SelectItem key={c.id} value={c.id}>{c.grade}'{c.number}</SelectItem>)}</SelectContent>
+            </Select>
+        </div>
+      </div>
 
-      {/* Submit bar */}
-      {students.length > 0 && (
-        <Card className="sticky bottom-4 z-40 shadow-lg border-primary/20">
-          <CardContent className="py-3 flex items-center gap-3">
-            <input
-              type="text"
-              placeholder="נושא השיעור (אופציונלי)"
-              value={topic}
-              onChange={e => setTopic(e.target.value)}
-              className="flex-1 bg-muted/50 rounded-lg px-3 py-2 text-sm font-body outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <Button className="gap-2 font-heading" onClick={handleSubmit} disabled={submitting || unmarkedCount === students.length}>
-              <Send className="h-4 w-4" />
-              {submitting ? "שומר..." : "שמור"}
-            </Button>
-          </CardContent>
+      {viewMode === "list" ? (
+        <div className="space-y-2">
+            {students.map(s => <SwipeableStudentRow key={s.id} student={s} isMobile={isMobile} onSwipe={handleSwipe} onLongPress={setLongPressStudentId} />)}
+        </div>
+      ) : (
+        <Card className="min-h-[500px]">
+            <CardContent className="p-0">
+                <ClassroomGrid
+                    config={ss.config}
+                    students={students.map(s => {
+                        const seated = ss.students.find(st => st.id === s.id);
+                        return { ...s, attendance: s.status || 'none', seatRow: seated?.seatRow, seatCol: seated?.seatCol } as any;
+                    })}
+                    mode="lesson"
+                    highlightedId={null}
+                    getStudentAt={(r, c) => {
+                        const seated = ss.students.find(st => st.seatRow === r && st.seatCol === c);
+                        if (!seated) return undefined;
+                        const s = students.find(st => st.id === seated.id);
+                        return s ? ({ ...s, attendance: s.status || 'none', seatRow: r, seatCol: c } as any) : undefined;
+                    }}
+                    onCellClick={(r, c, student) => student && handleSwipe(student.id, student.status === 'present' ? 'right' : 'left')}
+                    onDrop={() => {}}
+                />
+            </CardContent>
         </Card>
       )}
-    </motion.div>
+
+      <Card className="sticky bottom-4 z-40">
+        <CardContent className="py-3 flex items-center gap-3">
+          <input placeholder="נושא השיעור..." value={topic} onChange={e => setTopic(e.target.value)} className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm outline-none" />
+          <Button disabled={unmarkedCount === students.length}>שמור</Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 

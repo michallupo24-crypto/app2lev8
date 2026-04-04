@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { Student, AppMode, AttendanceStatus } from '@/types/smartseat';
+import React from 'react';
+import { Student, AppMode } from '@/types/smartseat';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
-import { Plus, Trash2, Volume2, UserPlus, Upload, X } from 'lucide-react';
+import { User, Plus, X, Trash2, Import, UserMinus, Volume2 } from 'lucide-react';
+import AvatarPreview from "@/components/avatar/AvatarPreview";
 
 interface Props {
     students: Student[];
@@ -19,129 +18,88 @@ interface Props {
     onUnassign: (id: string) => void;
 }
 
-const statusBadge: Record<AttendanceStatus, { label: string; cls: string }> = {
-    none: { label: '—', cls: 'bg-muted text-muted-foreground' },
-    present: { label: 'נוכח', cls: 'bg-success/20 text-success' },
-    absent: { label: 'חסר', cls: 'bg-destructive/20 text-destructive' },
-    late: { label: 'איחור', cls: 'bg-warning/20 text-warning' },
-    disruption: { label: 'הפרעה', cls: 'bg-destructive/20 text-destructive' },
-    positive: { label: 'חיובי', cls: 'bg-success/20 text-success' },
-};
-
 export function StudentSidebar({ students, unseated, mode, highlightedId, onAdd, onRemove, onHighlight, onSpeak, onCycleAttendance, onImport, onUnassign }: Props) {
-    const [newName, setNewName] = useState('');
-    const [showImport, setShowImport] = useState(false);
-    const [importText, setImportText] = useState('');
+    const [name, setName] = React.useState('');
 
-    const sorted = [...students].sort((a, b) => a.name.localeCompare(b.name, 'he'));
-
-    const handleAdd = () => {
-        if (!newName.trim()) return;
-        onAdd(newName);
-        setNewName('');
-    };
-
-    const handleImport = () => {
-        onImport(importText);
-        setImportText('');
-        setShowImport(false);
+    const handleDragStart = (e: React.DragEvent, id: string) => {
+        e.dataTransfer.setData('studentId', id);
     };
 
     return (
-        <aside className="w-72 bg-card border-s flex flex-col h-full">
-            <div className="p-4 border-b">
-                <h2 className="font-semibold text-foreground mb-3">
+        <aside className="w-80 border-r bg-card p-4 flex flex-col gap-6">
+            <div>
+                <h3 className="font-heading font-bold text-lg mb-4 flex items-center gap-2">
                     תלמידים ({students.length})
-                </h2>
-
+                </h3>
+                
                 {mode === 'edit' && (
-                    <>
-                        <div className="flex gap-2 mb-2">
-                            <Input
+                    <div className="space-y-4">
+                        <div className="flex gap-2">
+                            <input
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && (onAdd(name), setName(''))}
                                 placeholder="שם תלמיד/ה..."
-                                value={newName}
-                                onChange={e => setNewName(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleAdd()}
-                                className="text-sm"
+                                className="flex-1 px-3 py-2 rounded-lg border bg-background text-sm"
                             />
-                            <Button size="icon" variant="default" onClick={handleAdd}>
+                            <Button size="icon" onClick={() => (onAdd(name), setName(''))}>
                                 <Plus className="h-4 w-4" />
                             </Button>
                         </div>
-                        <Button size="sm" variant="outline" className="w-full gap-2 text-xs" onClick={() => setShowImport(!showImport)}>
-                            <Upload className="h-3 w-3" />
-                            ייבוא רשימה
-                        </Button>
-                        {showImport && (
-                            <div className="mt-2 space-y-2">
-                                <textarea
-                                    className="w-full h-24 text-xs p-2 rounded-md border bg-background resize-none"
-                                    placeholder="הדביקו שמות (שם בכל שורה, או מופרדים בפסיקים)"
-                                    value={importText}
-                                    onChange={e => setImportText(e.target.value)}
-                                />
-                                <Button size="sm" className="w-full" onClick={handleImport}>ייבוא</Button>
-                            </div>
-                        )}
-                    </>
+                    </div>
                 )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                {sorted.map(s => {
-                    const badge = statusBadge[s.attendance];
-                    return (
-                        <div
-                            key={s.id}
-                            className={cn(
-                                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer',
-                                highlightedId === s.id ? 'bg-accent/20 ring-2 ring-accent' : 'hover:bg-muted',
+            <div className="flex-1 overflow-auto space-y-2">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    {mode === 'edit' ? 'ממתינים לשיבוץ' : 'רשימת תלמידים'}
+                </h4>
+                
+                {(mode === 'edit' ? unseated : students).map(s => (
+                    <div
+                        key={s.id}
+                        draggable={mode === 'edit'}
+                        onDragStart={(e) => handleDragStart(e, s.id)}
+                        className={`
+                            group flex items-center justify-between p-2 rounded-xl border transition-all
+                            ${s.id === highlightedId ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-transparent hover:bg-muted'}
+                            ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : ''}
+                        `}
+                    >
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 flex items-center justify-center shrink-0">
+                            {s.avatar ? (
+                              <AvatarPreview config={s.avatar} size={32} />
+                            ) : (
+                              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                              </div>
                             )}
-                            onClick={() => onHighlight(highlightedId === s.id ? null : s.id)}
-                            draggable={mode === 'edit'}
-                            onDragStart={e => { e.dataTransfer.setData('studentId', s.id); }}
-                        >
-                            <div className="flex-1 font-medium text-card-foreground">{s.name}</div>
+                          </div>
+                          <span className="text-sm font-medium">{s.name}</span>
+                        </div>
 
-                            {mode === 'lesson' && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {mode === 'lesson' ? (
+                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onSpeak(s)}>
+                                    <Volume2 className="h-4 w-4" />
+                                </Button>
+                            ) : (
                                 <>
-                                    <button
-                                        onClick={e => { e.stopPropagation(); onCycleAttendance(s.id); }}
-                                        className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', badge.cls)}
-                                    >
-                                        {badge.label}
-                                    </button>
-                                    <button onClick={e => { e.stopPropagation(); onSpeak(s); }}>
-                                        <Volume2 className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />
-                                    </button>
+                                    {s.seatRow !== undefined && (
+                                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onUnassign(s.id)}>
+                                            <UserMinus className="h-4 w-4" />
+                                        </Button>
+                                    )}
+                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => onRemove(s.id)}>
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
                                 </>
                             )}
-
-                            {mode === 'edit' && (
-                                <div className="flex gap-1">
-                                    {s.seatRow !== undefined && (
-                                        <button onClick={e => { e.stopPropagation(); onUnassign(s.id); }} title="הסר ממקום">
-                                            <X className="h-3.5 w-3.5 text-muted-foreground hover:text-warning" />
-                                        </button>
-                                    )}
-                                    <button onClick={e => { e.stopPropagation(); onRemove(s.id); }}>
-                                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-                                    </button>
-                                </div>
-                            )}
                         </div>
-                    );
-                })}
+                    </div>
+                ))}
             </div>
-
-            {mode === 'edit' && unseated.length > 0 && (
-                <div className="p-3 border-t bg-muted/50">
-                    <p className="text-xs text-muted-foreground mb-1">
-                        <UserPlus className="h-3 w-3 inline ml-1" />
-                        ללא מקום ({unseated.length}) — גררו למפה
-                    </p>
-                </div>
-            )}
         </aside>
     );
 }

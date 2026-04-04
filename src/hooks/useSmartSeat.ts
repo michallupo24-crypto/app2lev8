@@ -26,10 +26,10 @@ export function useSmartSeat(classId?: string) {
                 setConfig({ rows: cfg.rows, cols: cfg.cols, className: "" });
             }
 
-            // 2. Fetch students (profiles)
+            // 2. Fetch students (profiles with avatars)
             const { data: profiles } = await supabase
                 .from('profiles')
-                .select('id, full_name')
+                .select('id, full_name, avatar')
                 .eq('class_id', classId)
                 .eq('is_approved', true);
 
@@ -44,7 +44,8 @@ export function useSmartSeat(classId?: string) {
             setStudents((profiles || []).map(p => ({
                 id: p.id,
                 name: p.full_name,
-                attendance: 'none',
+                avatar: p.avatar,
+                attendance: 'none' as AttendanceStatus,
                 seatRow: seatMap.get(p.id)?.row_index,
                 seatCol: seatMap.get(p.id)?.col_index,
             })));
@@ -75,7 +76,6 @@ export function useSmartSeat(classId?: string) {
 
             if (error) throw error;
             
-            // Update local state optimistically
             setStudents(prev => prev.map(s => {
                 if (s.id === studentId) return { ...s, seatRow: row, seatCol: col };
                 if (s.seatRow === row && s.seatCol === col) return { ...s, seatRow: undefined, seatCol: undefined };
@@ -113,7 +113,7 @@ export function useSmartSeat(classId?: string) {
     }, []);
 
     const resetAttendance = useCallback(() => {
-        setStudents(prev => prev.map(s => ({ ...s, attendance: 'none' })));
+        setStudents(prev => prev.map(s => ({ ...s, attendance: 'none' as AttendanceStatus })));
     }, []);
 
     const cycleAttendance = useCallback((id: string) => {
