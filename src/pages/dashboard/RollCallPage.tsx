@@ -145,7 +145,7 @@ const RollCallPage = () => {
     loadStudents();
   }, [selectedClass]);
 
-  const ss = useSmartSeat(selectedClass, selectedLesson);
+  const ss = useSmartSeat(selectedClass);
 
   const handleSwipe = useCallback((id: string, direction: "left" | "right" | "late") => {
     const status = direction === "left" ? "present" : direction === "right" ? "absent" : "late";
