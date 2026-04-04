@@ -140,6 +140,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     adminItems.push({ title: "כיתות", url: "/dashboard/classes", icon: BookOpen });
   }
   if (isEducator) {
+    adminItems.push({ title: "ניהול מפה", url: "/dashboard/seating", icon: LayoutDashboard });
     adminItems.push({ title: "הקראת שמות", url: "/dashboard/roll-call", icon: ClipboardList });
     adminItems.push({ title: "משימות", url: "/dashboard/teacher-assignments", icon: FileText });
   }

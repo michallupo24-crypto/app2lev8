@@ -49,6 +49,7 @@ import SystemAdminOrgTreePage from "./pages/dashboard/SystemAdminOrgTreePage";
 import SchedulePage from "./pages/dashboard/SchedulePage";
 import CommunityPage from "./pages/dashboard/CommunityPage";
 import StudentAttendancePage from "./pages/dashboard/StudentAttendancePage";
+import SeatingMapPage from "./pages/dashboard/SeatingMapPage";
 
 const queryClient = new QueryClient();
 
@@ -96,6 +97,7 @@ const App = () => (
             {/* Teacher routes */}
             <Route path="teacher-home" element={<TeacherDashboard />} />
             <Route path="roll-call" element={<RollCallPage />} />
+            <Route path="seating" element={<SeatingMapPage />} />
             <Route path="live-lesson" element={<TeacherLiveLessonPage />} />
             <Route path="teacher-assignments" element={<TeacherAssignmentsPage />} />
             <Route path="task-studio" element={<TaskStudioPage />} />
