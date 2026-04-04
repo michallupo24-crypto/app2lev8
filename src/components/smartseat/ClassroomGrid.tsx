@@ -173,7 +173,7 @@ export function ClassroomGrid({ config, students, mode, highlightedId, getStuden
                                         transition={{ duration: 1.5, repeat: Infinity }}
                                     />
                                 )}
-                            </div>
+                            </motion.div>
                         );
                     })
                 )}

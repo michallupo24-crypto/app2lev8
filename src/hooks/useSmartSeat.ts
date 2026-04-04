@@ -55,7 +55,7 @@ export function useSmartSeat(classId?: string) {
                 .select('*')
                 .eq('class_id', classId);
 
-            const seatMap = new Map((seats || []).map(s => [s.student_id, s]));
+            const seatMap = new Map((seats as any[] || []).map(s => [s.student_id, s]));
 
             setStudents(profiles.map(p => ({
                 id: p.id,
