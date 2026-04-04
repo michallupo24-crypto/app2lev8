@@ -3,10 +3,11 @@ import { AppSidebar } from "./AppSidebar";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { Outlet } from "react-router-dom";
-import { Bell } from "lucide-react";
+import { Bell, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import NotificationCenter from "../notifications/NotificationCenter";
 
 const DashboardLayout = () => {
   const { profile, loading, logout, refresh } = useAuth();
@@ -36,17 +37,19 @@ const DashboardLayout = () => {
               <span className="font-heading font-bold text-lg hidden sm:block">App2Class</span>
             </div>
             <div className="flex items-center gap-2">
+              <NotificationCenter userId={profile.id} />
               {profile.pendingApprovalsCount > 0 && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative"
+                  className="relative text-orange-500"
                   onClick={() => navigate("/dashboard/approvals")}
+                  title="אישורי הרשמה ממתינים"
                 >
-                  <Bell className="h-5 w-5" />
+                  <Users className="h-5 w-5" />
                   <Badge
                     variant="destructive"
-                    className="absolute -top-1 -left-1 text-[10px] px-1.5 py-0 h-5 min-w-5 flex items-center justify-center"
+                    className="absolute -top-1 -left-1 text-[10px] px-1 h-4 min-w-4 flex items-center justify-center"
                   >
                     {profile.pendingApprovalsCount}
                   </Badge>
