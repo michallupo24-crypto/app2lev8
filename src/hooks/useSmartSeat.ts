@@ -88,7 +88,7 @@ export function useSmartSeat(classId?: string) {
                     row_index: row,
                     col_index: col,
                     updated_at: new Date().toISOString()
-                }, { onConflict: 'class_id, student_id' });
+                }, { onConflict: 'class_id,student_id' });
 
             if (error) throw error;
             
