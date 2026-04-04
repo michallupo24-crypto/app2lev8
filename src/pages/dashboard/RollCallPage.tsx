@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ClipboardList, Check, X, Clock, Send, Undo2, Cake, MoreHorizontal, LayoutGrid, List } from "lucide-react";
+import { ClipboardList, Check, X, Clock, Send, Undo2, Cake, MoreHorizontal, LayoutGrid, List, Save, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,17 +29,6 @@ interface StudentCard {
   notes: { category: string; note?: string }[];
   isBirthday: boolean;
 }
-
-const NOTE_CATEGORIES = [
-  { value: "disruption", label: "הפרעה", color: "bg-destructive/10 text-destructive border-destructive/30", emoji: "⚠️" },
-  { value: "phone", label: "פלאפון", color: "bg-destructive/10 text-destructive border-destructive/30", emoji: "📱" },
-  { value: "disrespect", label: "חוצפה", color: "bg-destructive/10 text-destructive border-destructive/30", emoji: "😤" },
-  { value: "no_equipment", label: "חוסר ציוד", color: "bg-warning/10 text-warning border-warning/30", emoji: "🎒" },
-  { value: "no_homework", label: "לא הכין ש\"ב", color: "bg-warning/10 text-warning border-warning/30", emoji: "📝" },
-  { value: "positive_participation", label: "השתתפות יפה", color: "bg-success/10 text-success border-success/30", emoji: "⭐" },
-  { value: "helped_peer", label: "עזרה לחבר", color: "bg-success/10 text-success border-success/30", emoji: "🤝" },
-  { value: "excellence", label: "הצטיינות", color: "bg-success/10 text-success border-success/30", emoji: "🏆" },
-];
 
 const SWIPE_THRESHOLD = 60;
 
@@ -112,6 +101,7 @@ const RollCallPage = () => {
   const isMobile = useIsMobile();
   const [students, setStudents] = useState<StudentCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [selectedClass, setSelectedClass] = useState("");
   const [classes, setClasses] = useState<{ id: string; grade: string; number: number }[]>([]);
   const [topic, setTopic] = useState("");
@@ -139,6 +129,7 @@ const RollCallPage = () => {
       const avatarMap = new Map((avatars || []).map(a => [a.user_id, {
         body_type: a.face_shape || "basic", eye_color: a.eye_color || "brown", skin: a.skin_color || "#FDDBB4", hair_style: a.hair_style || "boy", hair_color: a.hair_color || "#2C1A0E",
       }]));
+
       setStudents(profiles.map(p => ({ id: p.id, name: p.full_name, avatar: avatarMap.get(p.id) || null, status: null, notes: [], isBirthday: false })));
       setLoading(false);
     };
@@ -151,6 +142,66 @@ const RollCallPage = () => {
     const status = direction === "left" ? "present" : direction === "right" ? "absent" : "late";
     setStudents(prev => prev.map(s => s.id === id ? { ...s, status: s.status === status ? null : status } : s));
   }, []);
+
+  const handleSave = async () => {
+    if (!selectedClass) return;
+    setIsSaving(true);
+    try {
+        // Create or find a lesson for today
+        const today = new Date().toISOString().split('T')[0];
+        let lessonId;
+
+        const { data: lesson } = await supabase
+            .from('lessons')
+            .select('id')
+            .eq('class_id', selectedClass)
+            .eq('subject', topic || 'שיעור ללא נושא')
+            .gte('created_at', today)
+            .limit(1)
+            .maybeSingle();
+
+        if (lesson) {
+            lessonId = lesson.id;
+        } else {
+            const { data: newLesson, error: lessonError } = await supabase
+                .from('lessons')
+                .insert({
+                    class_id: selectedClass,
+                    subject: topic || 'שיעור ללא נושא',
+                    teacher_id: profile.id,
+                    school_id: profile.schoolId
+                })
+                .select()
+                .single();
+            if (lessonError) throw lessonError;
+            lessonId = newLesson.id;
+        }
+
+        // Upsert attendance
+        const attendanceData = students
+            .filter(s => s.status)
+            .map(s => ({
+                student_id: s.id,
+                lesson_id: lessonId,
+                status: s.status,
+                noted_at: new Date().toISOString()
+            }));
+
+        if (attendanceData.length > 0) {
+            const { error: attError } = await supabase
+                .from('attendance')
+                .upsert(attendanceData, { onConflict: 'student_id,lesson_id' });
+            if (attError) throw attError;
+        }
+
+        toast({ title: "הנוכחות נשמרה בהצלחה!", description: `נשמרו ${attendanceData.length} רשומות.` });
+    } catch (err: any) {
+        console.error("Save error:", err);
+        toast({ variant: "destructive", title: "שגיאה בשמירה", description: err.message });
+    } finally {
+        setIsSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -200,7 +251,10 @@ const RollCallPage = () => {
       <Card className="sticky bottom-4 z-40">
         <CardContent className="py-3 flex items-center gap-3">
           <input placeholder="נושא השיעור..." value={topic} onChange={e => setTopic(e.target.value)} className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm outline-none" />
-          <Button onClick={() => toast({ title: "הנוכחות נשמרה" })}>שמור</Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            שמור
+          </Button>
         </CardContent>
       </Card>
     </div>
