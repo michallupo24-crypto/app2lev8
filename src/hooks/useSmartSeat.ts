@@ -77,9 +77,21 @@ export function useSmartSeat(classId?: string) {
     }, [loadData]);
 
     const assignSeat = async (studentId: string, row: number, col: number) => {
-        if (!classId) return;
+        if (!classId) {
+            console.error("Cannot assign seat: No classId provided");
+            return;
+        }
+        
+        console.log(`Assigning student ${studentId} to seat ${row},${col} for class ${classId}`);
         
         try {
+            // Optimistic update
+            setStudents(prev => prev.map(s => {
+                if (s.id === studentId) return { ...s, seatRow: row, seatCol: col };
+                if (s.seatRow === row && s.seatCol === col) return { ...s, seatRow: undefined, seatCol: undefined };
+                return s;
+            }));
+
             const { error } = await supabase
                 .from('student_seats')
                 .upsert({
@@ -90,15 +102,13 @@ export function useSmartSeat(classId?: string) {
                     updated_at: new Date().toISOString()
                 }, { onConflict: 'class_id,student_id' });
 
-            if (error) throw error;
-            
-            setStudents(prev => prev.map(s => {
-                if (s.id === studentId) return { ...s, seatRow: row, seatCol: col };
-                if (s.seatRow === row && s.seatCol === col) return { ...s, seatRow: undefined, seatCol: undefined };
-                return s;
-            }));
+            if (error) {
+                console.error("Database error during seat assignment:", error);
+                throw error;
+            }
         } catch (error) {
-            console.error("Error assigning seat:", error);
+            console.error("Failed to assign seat:", error);
+            // Revert on error if needed, but for now we let optimistic stay for UI feel
         }
     };
 
