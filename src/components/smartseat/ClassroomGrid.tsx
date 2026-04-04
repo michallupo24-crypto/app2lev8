@@ -33,15 +33,31 @@ const statusLabels: Record<AttendanceStatus, string> = {
 };
 
 export function ClassroomGrid({ config, students, mode, highlightedId, getStudentAt, onCellClick, onDrop }: Props) {
-    const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    const [dragOverCell, setDragOverCell] = React.useState<string | null>(null);
+
+    const handleDragOver = (e: React.DragEvent, r: number, c: number) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverCell(`${r}-${c}`);
+    };
+
+    const handleDragLeave = () => {
+        setDragOverCell(null);
+    };
+
     const handleDrop = (e: React.DragEvent, r: number, c: number) => {
         e.preventDefault();
-        const id = e.dataTransfer.getData('studentId');
-        if (id) onDrop(r, c, id);
+        setDragOverCell(null);
+        
+        // Try multiple ways to get the ID for cross-browser compatibility
+        const id = e.dataTransfer.getData('studentId') || e.dataTransfer.getData('text/plain');
+        if (id) {
+            onDrop(r, c, id);
+        }
     };
 
     return (
-        <div className="flex flex-col items-center gap-6 p-4 bg-muted/5 min-h-full">
+        <div className="flex flex-col items-center gap-6 p-4 bg-muted/5 min-h-full" onDragLeave={handleDragLeave}>
             {/* Teacher desk */}
             <div className="w-56 h-12 rounded-xl bg-primary/20 border-2 border-primary/40 flex items-center justify-center text-sm font-bold text-primary shadow-sm mb-6">
                 שולחן מורה
@@ -59,6 +75,7 @@ export function ClassroomGrid({ config, students, mode, highlightedId, getStuden
                     Array.from({ length: config.cols }).map((_, c) => {
                         const student = getStudentAt(r, c);
                         const isHighlighted = student?.id === highlightedId;
+                        const isDragOver = dragOverCell === `${r}-${c}`;
 
                         return (
                             <div
@@ -67,14 +84,19 @@ export function ClassroomGrid({ config, students, mode, highlightedId, getStuden
                                     'group relative h-28 rounded-2xl border-2 transition-all duration-300 flex flex-col items-center justify-center p-2',
                                     student ? statusColors[student.attendance] : 'bg-muted/10 border-dashed border-muted-foreground/20 hover:border-primary/30 hover:bg-primary/5',
                                     isHighlighted && 'ring-4 ring-accent ring-offset-2 animate-pulse',
+                                    isDragOver && 'border-primary bg-primary/20 scale-105 z-20',
                                     mode === 'edit' && student && 'cursor-grab active:cursor-grabbing',
                                     mode === 'lesson' && student && 'cursor-pointer active:scale-95'
                                 )}
                                 onClick={() => onCellClick(r, c, student)}
-                                onDragOver={mode === 'edit' ? handleDragOver : undefined}
+                                onDragOver={mode === 'edit' ? (e) => handleDragOver(e, r, c) : undefined}
+                                onDragLeave={handleDragLeave}
                                 onDrop={mode === 'edit' ? (e) => handleDrop(e, r, c) : undefined}
                                 draggable={mode === 'edit' && !!student}
-                                onDragStart={student ? (e) => e.dataTransfer.setData('studentId', student.id) : undefined}
+                                onDragStart={student ? (e) => {
+                                    e.dataTransfer.setData('studentId', student.id);
+                                    e.dataTransfer.setData('text/plain', student.id);
+                                } : undefined}
                             >
                                 {student ? (
                                     <>
@@ -99,7 +121,7 @@ export function ClassroomGrid({ config, students, mode, highlightedId, getStuden
                                     </>
                                 ) : (
                                     <span className="text-[10px] text-muted-foreground/40 font-mono">
-                                        {mode === 'edit' ? `${r + 1},${c + 1}` : ''}
+                                        {mode === 'edit' && !isDragOver ? `${r + 1},${c + 1}` : ''}
                                     </span>
                                 )}
                             </div>

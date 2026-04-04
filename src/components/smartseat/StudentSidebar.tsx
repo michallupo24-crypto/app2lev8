@@ -23,10 +23,12 @@ export function StudentSidebar({ students, unseated, mode, highlightedId, onAdd,
 
     const handleDragStart = (e: React.DragEvent, id: string) => {
         e.dataTransfer.setData('studentId', id);
+        e.dataTransfer.setData('text/plain', id); // Cross-browser fallback
+        e.dataTransfer.effectAllowed = 'move';
     };
 
     return (
-        <aside className="w-80 border-r bg-card p-4 flex flex-col gap-6">
+        <aside className="w-80 border-r bg-card p-4 flex flex-col gap-6" dir="rtl">
             <div>
                 <h3 className="font-heading font-bold text-lg mb-4 flex items-center gap-2">
                     תלמידים ({students.length})
@@ -63,7 +65,7 @@ export function StudentSidebar({ students, unseated, mode, highlightedId, onAdd,
                         className={`
                             group flex items-center justify-between p-2 rounded-xl border transition-all
                             ${s.id === highlightedId ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-transparent hover:bg-muted'}
-                            ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : ''}
+                            ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing hover:border-primary/30' : ''}
                         `}
                     >
                         <div className="flex items-center gap-3">
