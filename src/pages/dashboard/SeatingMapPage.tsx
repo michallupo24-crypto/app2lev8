@@ -13,15 +13,16 @@ const SeatingMapPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
   const [classId, setClassId] = useState<string | undefined>(undefined);
 
-  // For educators, get their class ID
   useEffect(() => {
     const fetchClassId = async () => {
       if (!profile?.id) return;
+      // Get the first class assigned to this teacher
       const { data } = await supabase
-        .from('profiles')
+        .from('teacher_classes')
         .select('class_id')
-        .eq('id', profile.id)
-        .single();
+        .eq('user_id', profile.id)
+        .limit(1)
+        .maybeSingle();
       
       if (data?.class_id) {
         setClassId(data.class_id);
