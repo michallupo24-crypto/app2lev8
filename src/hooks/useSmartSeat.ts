@@ -1,39 +1,119 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { Student, ClassroomConfig, AppMode, AttendanceStatus } from '@/types/smartseat';
 
-const DEFAULT_CONFIG: ClassroomConfig = { rows: 5, cols: 6, className: 'כיתה א׳1' };
-
-const createId = () => Math.random().toString(36).slice(2, 9);
-
-export function useSmartSeat() {
+export function useSmartSeat(classId?: string) {
     const [mode, setMode] = useState<AppMode>('edit');
     const [students, setStudents] = useState<Student[]>([]);
-    const [config, setConfig] = useState<ClassroomConfig>(DEFAULT_CONFIG);
+    const [config, setConfig] = useState<ClassroomConfig>({ rows: 6, cols: 6, className: "" });
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     const [isSpeaking, setIsSpeaking] = useState(false);
+    const [loading, setLoading] = useState(true);
 
-    const addStudent = useCallback((name: string) => {
-        setStudents(prev => [...prev, { id: createId(), name: name.trim(), attendance: 'none' }]);
+    const loadData = useCallback(async () => {
+        if (!classId) return;
+        setLoading(true);
+
+        try {
+            // 1. Fetch class config
+            const { data: cfg } = await supabase
+                .from('class_configs')
+                .select('*')
+                .eq('class_id', classId)
+                .maybeSingle();
+            
+            if (cfg) {
+                setConfig({ rows: cfg.rows, cols: cfg.cols, className: "" });
+            }
+
+            // 2. Fetch students (profiles)
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, full_name')
+                .eq('class_id', classId)
+                .eq('is_approved', true);
+
+            // 3. Fetch seats
+            const { data: seats } = await supabase
+                .from('student_seats')
+                .select('*')
+                .eq('class_id', classId);
+
+            const seatMap = new Map((seats || []).map(s => [s.student_id, s]));
+
+            setStudents((profiles || []).map(p => ({
+                id: p.id,
+                name: p.full_name,
+                attendance: 'none',
+                seatRow: seatMap.get(p.id)?.row_index,
+                seatCol: seatMap.get(p.id)?.col_index,
+            })));
+        } catch (error) {
+            console.error("Error loading smart seat data:", error);
+        } finally {
+            setLoading(false);
+        }
+    }, [classId]);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    const assignSeat = async (studentId: string, row: number, col: number) => {
+        if (!classId) return;
+        
+        try {
+            const { error } = await supabase
+                .from('student_seats')
+                .upsert({
+                    class_id: classId,
+                    student_id: studentId,
+                    row_index: row,
+                    col_index: col,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'class_id, student_id' });
+
+            if (error) throw error;
+            
+            // Update local state optimistically
+            setStudents(prev => prev.map(s => {
+                if (s.id === studentId) return { ...s, seatRow: row, seatCol: col };
+                if (s.seatRow === row && s.seatCol === col) return { ...s, seatRow: undefined, seatCol: undefined };
+                return s;
+            }));
+        } catch (error) {
+            console.error("Error assigning seat:", error);
+        }
+    };
+
+    const unassignSeat = async (studentId: string) => {
+        if (!classId) return;
+        
+        try {
+            await supabase
+                .from('student_seats')
+                .delete()
+                .eq('class_id', classId)
+                .eq('student_id', studentId);
+                
+            setStudents(prev => prev.map(s => s.id === studentId ? { ...s, seatRow: undefined, seatCol: undefined } : s));
+        } catch (error) {
+            console.error("Error unassigning seat:", error);
+        }
+    };
+
+    const getStudentAt = useCallback((row: number, col: number) => {
+        return students.find(s => s.seatRow === row && s.seatCol === col);
+    }, [students]);
+
+    const stopSpeaking = useCallback(() => {
+        window.speechSynthesis?.cancel();
+        setIsSpeaking(false);
+        setHighlightedId(null);
     }, []);
 
-    const removeStudent = useCallback((id: string) => {
-        setStudents(prev => prev.filter(s => s.id !== id));
-    }, []);
-
-    const assignSeat = useCallback((studentId: string, row: number, col: number) => {
-        setStudents(prev => prev.map(s => {
-            if (s.id === studentId) return { ...s, seatRow: row, seatCol: col };
-            if (s.seatRow === row && s.seatCol === col) return { ...s, seatRow: undefined, seatCol: undefined };
-            return s;
-        }));
-    }, []);
-
-    const unassignSeat = useCallback((studentId: string) => {
-        setStudents(prev => prev.map(s => s.id === studentId ? { ...s, seatRow: undefined, seatCol: undefined } : s));
-    }, []);
-
-    const setAttendance = useCallback((id: string, status: AttendanceStatus) => {
-        setStudents(prev => prev.map(s => s.id === id ? { ...s, attendance: status } : s));
+    const resetAttendance = useCallback(() => {
+        setStudents(prev => prev.map(s => ({ ...s, attendance: 'none' })));
     }, []);
 
     const cycleAttendance = useCallback((id: string) => {
@@ -45,71 +125,11 @@ export function useSmartSeat() {
         }));
     }, []);
 
-    const getStudentAt = useCallback((row: number, col: number) => {
-        return students.find(s => s.seatRow === row && s.seatCol === col);
-    }, [students]);
-
-    const unseatedStudents = students.filter(s => s.seatRow === undefined);
-
-    const speak = useCallback((text: string) => {
-        if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = 'he-IL';
-        u.rate = 0.9;
-        const voices = window.speechSynthesis.getVoices();
-        const heVoice = voices.find(v => v.lang.startsWith('he'));
-        if (heVoice) u.voice = heVoice;
-        u.onend = () => setIsSpeaking(false);
-        setIsSpeaking(true);
-        window.speechSynthesis.speak(u);
-    }, []);
-
-    const speakStudent = useCallback((student: Student) => {
-        setHighlightedId(student.id);
-        speak(student.name);
-        setTimeout(() => setHighlightedId(null), 2500);
-    }, [speak]);
-
-    const autoScan = useCallback(() => {
-        const seated = students.filter(s => s.seatRow !== undefined)
-            .sort((a, b) => (a.seatRow! - b.seatRow!) || (a.seatCol! - b.seatCol!));
-        if (!seated.length) return;
-
-        let i = 0;
-        const next = () => {
-            if (i >= seated.length) { setIsSpeaking(false); return; }
-            const s = seated[i];
-            setHighlightedId(s.id);
-            speak(s.name);
-            i++;
-            setTimeout(next, 2500);
-        };
-        next();
-    }, [students, speak]);
-
-    const stopSpeaking = useCallback(() => {
-        window.speechSynthesis?.cancel();
-        setIsSpeaking(false);
-        setHighlightedId(null);
-    }, []);
-
-    const importStudents = useCallback((text: string) => {
-        const names = text.split(/[\n,;]+/).map(n => n.trim()).filter(Boolean);
-        const newStudents: Student[] = names.map(name => ({ id: createId(), name, attendance: 'none' }));
-        setStudents(prev => [...prev, ...newStudents]);
-    }, []);
-
-    const resetAttendance = useCallback(() => {
-        setStudents(prev => prev.map(s => ({ ...s, attendance: 'none' })));
-    }, []);
-
     return {
         mode, setMode, students, config, setConfig,
-        highlightedId, setHighlightedId, isSpeaking,
-        addStudent, removeStudent, assignSeat, unassignSeat,
-        setAttendance, cycleAttendance, getStudentAt, unseatedStudents,
-        speakStudent, autoScan, stopSpeaking, importStudents, resetAttendance,
+        loading, highlightedId, getStudentAt,
+        assignSeat, unassignSeat, cycleAttendance,
+        unseatedStudents: students.filter(s => s.seatRow === undefined),
+        resetAttendance, stopSpeaking, refresh: loadData
     };
 }
-
