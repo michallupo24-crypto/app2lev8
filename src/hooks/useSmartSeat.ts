@@ -26,14 +26,30 @@ export function useSmartSeat(classId?: string) {
                 setConfig({ rows: cfg.rows, cols: cfg.cols, className: "" });
             }
 
-            // 2. Fetch students (profiles with avatars)
+            // 2. Fetch students (profiles)
             const { data: profiles } = await supabase
                 .from('profiles')
-                .select('id, full_name, avatar')
+                .select('id, full_name')
                 .eq('class_id', classId)
                 .eq('is_approved', true);
 
-            // 3. Fetch seats
+            if (!profiles) return;
+
+            // 3. Fetch avatars
+            const { data: avatarRows } = await supabase
+                .from('avatars')
+                .select('*')
+                .in('user_id', profiles.map(p => p.id));
+
+            const avatarMap = new Map((avatarRows || []).map(a => [a.user_id, {
+                body_type: a.face_shape || "basic",
+                eye_color: a.eye_color || "brown",
+                skin: a.skin_color || "#FDDBB4",
+                hair_style: a.hair_style || "boy",
+                hair_color: a.hair_color || "#2C1A0E",
+            }]));
+
+            // 4. Fetch seats
             const { data: seats } = await supabase
                 .from('student_seats')
                 .select('*')
@@ -41,10 +57,10 @@ export function useSmartSeat(classId?: string) {
 
             const seatMap = new Map((seats || []).map(s => [s.student_id, s]));
 
-            setStudents((profiles || []).map(p => ({
+            setStudents(profiles.map(p => ({
                 id: p.id,
                 name: p.full_name,
-                avatar: p.avatar,
+                avatar: avatarMap.get(p.id) || null,
                 attendance: 'none' as AttendanceStatus,
                 seatRow: seatMap.get(p.id)?.row_index,
                 seatCol: seatMap.get(p.id)?.col_index,
