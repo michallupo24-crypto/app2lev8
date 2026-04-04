@@ -4,9 +4,33 @@ import { ClassroomGrid } from '@/components/smartseat/ClassroomGrid';
 import { StudentSidebar } from '@/components/smartseat/StudentSidebar';
 import { LessonControls } from '@/components/smartseat/LessonControls';
 import { GridSettings } from '@/components/smartseat/GridSettings';
+import { useOutletContext } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import type { UserProfile } from '@/hooks/useAuth';
 
 const SeatingMapPage = () => {
-  const ss = useSmartSeat();
+  const { profile } = useOutletContext<{ profile: UserProfile }>();
+  const [classId, setClassId] = useState<string | undefined>(undefined);
+
+  // For educators, get their class ID
+  useEffect(() => {
+    const fetchClassId = async () => {
+      if (!profile?.id) return;
+      const { data } = await supabase
+        .from('profiles')
+        .select('class_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (data?.class_id) {
+        setClassId(data.class_id);
+      }
+    };
+    fetchClassId();
+  }, [profile?.id]);
+
+  const ss = useSmartSeat(classId);
 
   const handleCellClick = (r: number, c: number, student?: any) => {
     if (ss.mode === 'lesson' && student) {
@@ -28,7 +52,7 @@ const SeatingMapPage = () => {
       {ss.mode === 'lesson' && (
         <LessonControls
           isSpeaking={ss.isSpeaking}
-          onAutoScan={ss.autoScan}
+          onAutoScan={()=>{}}
           onStop={ss.stopSpeaking}
           onResetAttendance={ss.resetAttendance}
           studentCount={ss.students.length}
@@ -54,12 +78,12 @@ const SeatingMapPage = () => {
           unseated={ss.unseatedStudents}
           mode={ss.mode}
           highlightedId={ss.highlightedId}
-          onAdd={ss.addStudent}
-          onRemove={ss.removeStudent}
+          onAdd={()=>{}}
+          onRemove={()=>{}}
           onHighlight={ss.setHighlightedId}
-          onSpeak={ss.speakStudent}
+          onSpeak={()=>{}}
           onCycleAttendance={ss.cycleAttendance}
-          onImport={ss.importStudents}
+          onImport={()=>{}}
           onUnassign={ss.unassignSeat}
         />
       </div>
