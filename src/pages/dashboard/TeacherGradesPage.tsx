@@ -21,8 +21,9 @@ import {
 } from "recharts";
 
 interface ClassOption { id: string; grade: string; number: number; }
-interface AssignmentOption { id: string; title: string; subject: string; type: string; maxGrade: number; weight: number; dueDate?: string; }
-interface StudentGrade { submissionId: string | null; studentId: string; studentName: string; grade: number | null; status: string; feedback: string | null; hasAppeal?: boolean; level?: number; badgeCount?: number; }
+interface AssignmentOption { id: string; title: string; subject: string; type: string; maxGrade: number; weight: number; dueDate?: string; description?: string; }
+interface StudentGrade { submissionId: string | null; studentId: string; studentName: string; grade: number | null; status: string; feedback: string | null; hasAppeal?: boolean; level?: number; badgeCount?: number; fileUrl?: string | null; gameResult?: { score: number; correctAnswers: number; totalAnswers: number; finalPosition: number; completedAt: string } | null; }
+interface AssignmentMeta { isGame: boolean; gameType?: string; }
 interface SubjectAvg { subject: string; avg: number; count: number; }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -51,6 +52,7 @@ const TeacherGradesPage = () => {
   const [showGrading, setShowGrading] = useState(false);
   const [subjectAvgs, setSubjectAvgs] = useState<SubjectAvg[]>([]);
   const [activeTab, setActiveTab] = useState("grade");
+  const [assignmentMeta, setAssignmentMeta] = useState<AssignmentMeta>({ isGame: false });
 
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
   const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -75,7 +77,7 @@ const TeacherGradesPage = () => {
     if (!selectedClass) return;
     const load = async () => {
       const { data } = await supabase.from("assignments")
-        .select("id, title, subject, type, max_grade, weight_percent, due_date")
+        .select("id, title, subject, type, max_grade, weight_percent, due_date, description")
         .eq("teacher_id", profile.id).eq("class_id", selectedClass)
         .order("created_at", { ascending: false });
       if (data) {
@@ -95,16 +97,25 @@ const TeacherGradesPage = () => {
     const load = async () => {
       setLoading(true);
       const { data: students } = await supabase.from("profiles").select("id, full_name").eq("class_id", selectedClass).order("full_name");
-      const { data: submissions } = await supabase.from("submissions").select("id, student_id, grade, status, feedback").eq("assignment_id", selectedAssignment);
-      
+      const { data: submissions } = await supabase.from("submissions").select("id, student_id, grade, status, feedback, file_url, content").eq("assignment_id", selectedAssignment);
+      // Detect if this is a game assignment
+      const thisAssignment = assignments.find(a => a.id === selectedAssignment) as any;
+      let isGame = false;
+      let gameType: string | undefined;
+      try {
+        const descObj = thisAssignment?.description ? JSON.parse(thisAssignment.description) : null;
+        if (descObj?.game) { isGame = true; gameType = descObj.game; }
+      } catch { }
+      setAssignmentMeta({ isGame, gameType });
+
       // Gamer stats
       const studentIds = (students || []).map(s => s.id);
       const { data: bData } = await supabase.from("user_badges").select("user_id").in("user_id", studentIds);
       const { data: sData } = await supabase.from("user_streaks").select("user_id, total_active_days").in("user_id", studentIds);
-      
+
       const badgeMap = new Map<string, number>();
       bData?.forEach(b => badgeMap.set(b.user_id, (badgeMap.get(b.user_id) || 0) + 1));
-      
+
       const streakMap = new Map<string, number>();
       sData?.forEach(s => streakMap.set(s.user_id, s.total_active_days || 0));
 
@@ -116,12 +127,21 @@ const TeacherGradesPage = () => {
         const xp = (activeDays * 10) + (bCount * 100);
         const lvl = Math.floor(xp / 500) + 1;
 
+        let gameResult = null;
+        if (sub?.content) {
+          try {
+            const parsed = JSON.parse(sub.content);
+            if (parsed?.type === "snakes-ladders") gameResult = parsed;
+          } catch { }
+        }
         return {
           submissionId: sub?.id || null, studentId: st.id, studentName: st.full_name,
           grade: sub?.grade ?? null, status: sub?.status || "draft", feedback: sub?.feedback || null,
           hasAppeal: sub?.feedback?.startsWith("[ערעור") || false,
           level: lvl,
           badgeCount: bCount,
+          fileUrl: sub?.file_url ?? null,
+          gameResult,
         };
       }));
       setGradeEdits({});
@@ -138,10 +158,10 @@ const TeacherGradesPage = () => {
         .select("grade, assignments(subject, max_grade, class_id)")
         .eq("status", "graded").not("grade", "is", null);
       if (!data) return;
-      
+
       const classData = (data as any[]).filter((s: any) => s.assignments?.class_id === selectedClass);
       const bySubject = new Map<string, number[]>();
-      
+
       classData.forEach((s: any) => {
         const subj = s.assignments?.subject;
         const maxG = s.assignments?.max_grade || 100;
@@ -263,6 +283,26 @@ const TeacherGradesPage = () => {
               <Button variant="outline" className="gap-2 font-heading" onClick={() => setShowGrading(true)} disabled={!selectedAssignment}>
                 <FileText className="h-4 w-4" />הזן ציונים
               </Button>
+              {assignmentMeta.isGame && studentGrades.some(sg => sg.gameResult) && (
+                <Button variant="outline" className="gap-2 font-heading text-green-600 border-green-300 hover:bg-green-50 dark:hover:bg-green-900/20"
+                  onClick={() => {
+                    // Auto-fill grade edits from game scores
+                    const autoEdits: Record<string, { grade: string; feedback: string }> = {};
+                    studentGrades.forEach(sg => {
+                      if (sg.gameResult) {
+                        autoEdits[sg.studentId] = {
+                          grade: sg.gameResult.score.toString(),
+                          feedback: `🎮 ציון משחק אוטומטי — ${sg.gameResult.correctAnswers}/${sg.gameResult.totalAnswers} נכון`,
+                        };
+                      }
+                    });
+                    setGradeEdits(autoEdits);
+                    setShowGrading(true);
+                    toast({ title: "הציונים מולאו אוטומטית מתוצאות המשחק ✅", description: "עיין ואשר לפני השמירה" });
+                  }}>
+                  <Zap className="h-4 w-4" />הזן ציוני משחק אוטומטית
+                </Button>
+              )}
             </div>
 
             {loading ? (
@@ -342,14 +382,14 @@ const TeacherGradesPage = () => {
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <span className="font-heading text-sm truncate">{sg.studentName}</span>
                             <div className="flex items-center gap-1.5 mr-2">
-                               <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-primary/5 border-primary/20 text-primary">
-                                  <Zap className="h-2.5 w-2.5 fill-primary" />
-                                  LVL {sg.level}
-                               </Badge>
-                               <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-yellow-500/5 border-yellow-500/20 text-yellow-600">
-                                  <Trophy className="h-2.5 w-2.5 fill-yellow-500/20" />
-                                  {sg.badgeCount}
-                               </Badge>
+                              <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-primary/5 border-primary/20 text-primary">
+                                <Zap className="h-2.5 w-2.5 fill-primary" />
+                                LVL {sg.level}
+                              </Badge>
+                              <Badge variant="outline" className="h-5 text-[9px] gap-1 bg-yellow-500/5 border-yellow-500/20 text-yellow-600">
+                                <Trophy className="h-2.5 w-2.5 fill-yellow-500/20" />
+                                {sg.badgeCount}
+                              </Badge>
                             </div>
                             {sg.hasAppeal && (
                               <Badge variant="outline" className="text-[10px] text-orange-500 border-orange-300">⚠ ערעור</Badge>
@@ -357,16 +397,27 @@ const TeacherGradesPage = () => {
                             {sg.feedback && !sg.hasAppeal && (
                               <span className="text-[10px] text-muted-foreground truncate max-w-32">💬 {sg.feedback}</span>
                             )}
+                            {sg.gameResult && (
+                              <Badge variant="outline" className="text-[9px] gap-1 border-green-300 text-green-600 bg-green-50 dark:bg-green-900/20 shrink-0">
+                                🎮 {sg.gameResult.score}% • {sg.gameResult.correctAnswers}/{sg.gameResult.totalAnswers}
+                              </Badge>
+                            )}
+                            {sg.fileUrl && !sg.gameResult && (
+                              <a href={sg.fileUrl} target="_blank" rel="noreferrer"
+                                className="text-[10px] text-primary hover:underline flex items-center gap-0.5 shrink-0">
+                                📎 קובץ
+                              </a>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="h-8 w-8 p-0 hover:text-primary"
                               onClick={() => navigate(`/dashboard/report/${sg.studentId}`)}
                               title="צפה בתעודת רבעון"
                             >
-                               <FileText className="h-4 w-4" />
+                              <FileText className="h-4 w-4" />
                             </Button>
                             {sg.grade !== null ? (
                               <>

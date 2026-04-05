@@ -24,7 +24,7 @@ const LADDERS: Record<number, number> = {
 };
 
 const PLAYER_COLORS = ["#6366f1", "#ef4444", "#22c55e", "#f59e0b"];
-const PLAYER_EMOJI  = ["🟣", "🔴", "🟢", "🟡"];
+const PLAYER_EMOJI = ["🟣", "🔴", "🟢", "🟡"];
 
 interface Question {
   id: string;
@@ -267,15 +267,32 @@ const SnakesLaddersGamePage = () => {
   const saveScore = async (finalPos: number) => {
     if (!assignmentId) return;
     const pct = totalAnswered > 0 ? Math.round((correctCount / totalAnswered) * 100) : 0;
+    // Save detailed game result in content field for teacher to see
+    const gameResult = JSON.stringify({
+      type: "snakes-ladders",
+      score: pct,
+      correctAnswers: correctCount,
+      totalAnswers: totalAnswered,
+      finalPosition: finalPos,
+      playerName: players[0]?.name || profile.fullName,
+      completedAt: new Date().toISOString(),
+    });
     try {
       const { data: ex } = await supabase.from("submissions").select("id")
         .eq("assignment_id", assignmentId).eq("student_id", profile.id).maybeSingle();
       if (ex) {
-        await supabase.from("submissions").update({ grade: pct, status: "submitted" as any, submitted_at: new Date().toISOString() }).eq("id", ex.id);
+        await supabase.from("submissions").update({
+          grade: pct,
+          status: "submitted" as any,
+          submitted_at: new Date().toISOString(),
+          content: gameResult,
+        }).eq("id", ex.id);
       } else {
         await supabase.from("submissions").insert({
           assignment_id: assignmentId, student_id: profile.id,
-          grade: pct, status: "submitted" as any, submitted_at: new Date().toISOString(),
+          grade: pct, status: "submitted" as any,
+          submitted_at: new Date().toISOString(),
+          content: gameResult,
         });
       }
     } catch { /* best effort */ }
@@ -287,7 +304,7 @@ const SnakesLaddersGamePage = () => {
     for (let row = 0; row < 10; row++) {
       for (let col = 0; col < 10; col++) {
         const num = cellNum(row, col);
-        const isSnake  = SNAKES[num]  !== undefined;
+        const isSnake = SNAKES[num] !== undefined;
         const isLadder = LADDERS[num] !== undefined;
         const playersHere = players.filter(p => p.pos === num);
         const isTarget = movingTo === num;
@@ -295,7 +312,7 @@ const SnakesLaddersGamePage = () => {
         cells.push(
           <div key={num}
             className={`relative flex flex-col items-center justify-center border text-center select-none
-              ${isSnake  ? "bg-red-100 dark:bg-red-900/30 border-red-300"   : ""}
+              ${isSnake ? "bg-red-100 dark:bg-red-900/30 border-red-300" : ""}
               ${isLadder ? "bg-green-100 dark:bg-green-900/30 border-green-300" : ""}
               ${!isSnake && !isLadder ? "bg-muted/30 border-border/30" : ""}
               ${isTarget ? "ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30" : ""}
@@ -303,7 +320,7 @@ const SnakesLaddersGamePage = () => {
             style={{ aspectRatio: "1" }}
           >
             <span className="text-[7px] sm:text-[9px] text-muted-foreground leading-none">{num}</span>
-            {isSnake  && <span className="text-[10px] leading-none">🐍</span>}
+            {isSnake && <span className="text-[10px] leading-none">🐍</span>}
             {isLadder && <span className="text-[10px] leading-none">🪜</span>}
             {num === 100 && <span className="text-[10px] leading-none">🏁</span>}
             {playersHere.length > 0 && (
@@ -326,12 +343,12 @@ const SnakesLaddersGamePage = () => {
 
   /* ─── DICE FACE ─── */
   const DICE_DOTS: Record<number, number[][]> = {
-    1: [[50,50]],
-    2: [[25,25],[75,75]],
-    3: [[25,25],[50,50],[75,75]],
-    4: [[25,25],[75,25],[25,75],[75,75]],
-    5: [[25,25],[75,25],[50,50],[25,75],[75,75]],
-    6: [[25,25],[75,25],[25,50],[75,50],[25,75],[75,75]],
+    1: [[50, 50]],
+    2: [[25, 25], [75, 75]],
+    3: [[25, 25], [50, 50], [75, 75]],
+    4: [[25, 25], [75, 25], [25, 75], [75, 75]],
+    5: [[25, 25], [75, 25], [50, 50], [25, 75], [75, 75]],
+    6: [[25, 25], [75, 25], [25, 50], [75, 50], [25, 75], [75, 75]],
   };
 
   const DiceFace = ({ value }: { value: number }) => (
@@ -391,7 +408,7 @@ const SnakesLaddersGamePage = () => {
         <div className="w-full max-w-xs space-y-2">
           {[...players].sort((a, b) => b.score - a.score).map((p, i) => (
             <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-              <span className="font-heading text-sm">{["🥇","🥈","🥉"][i] || "  "} {p.emoji} {p.name}</span>
+              <span className="font-heading text-sm">{["🥇", "🥈", "🥉"][i] || "  "} {p.emoji} {p.name}</span>
               <Badge variant="outline">{p.score} נק'</Badge>
             </div>
           ))}
@@ -580,7 +597,7 @@ const SnakesLaddersGamePage = () => {
       </div>
 
       {/* Question dialog */}
-      <Dialog open={showQ} onOpenChange={() => {}}>
+      <Dialog open={showQ} onOpenChange={() => { }}>
         <DialogContent className="max-w-md" onInteractOutside={e => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
