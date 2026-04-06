@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Users, TrendingUp, TrendingDown, Minus, BookOpen, AlertTriangle,
   CheckCircle2, Clock, MessageSquare, Send, Loader2, BarChart3,
-  Calendar, Heart, Brain, Target,
+  Calendar, Heart, Brain, Target, Trophy, ChevronRight,
 } from "lucide-react";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,12 +24,14 @@ import { getStudentGrades, SubjectGradeReport } from "@/utils/gradingEngine";
 
 interface ChildInfo {
   id: string;
+  fullName: string;
   grade: string | null;
   classNumber: number | null;
   schoolName: string | null;
   schoolId: string | null;
   classId: string | null;
   isApproved: boolean;
+  level?: number;
 }
 
 interface SubjectStat {
@@ -48,6 +50,7 @@ interface AttendanceStat {
   absent: number;
   late: number;
   absencePct: number;
+  presencePct: number;
   redLine: boolean;
 }
 
@@ -81,22 +84,19 @@ const ParentDashboardPage = () => {
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
   const [attendance, setAttendance] = useState<AttendanceStat | null>(null);
   const [recentGrades, setRecentGrades] = useState<GradeEntry[]>([]);
-  const [subjectGrades, setSubjectGrades] = useState<SubjectGradeReport[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [pendingTasks, setPendingTasks] = useState(0);
   const [childLoading, setChildLoading] = useState(false);
   const [liveAlert, setLiveAlert] = useState<{ studentName: string; status: "absent" | "late"; time: string } | null>(null);
   const realtimeRef = useRef<any>(null);
 
-  // Message teacher
   const [messageDialog, setMessageDialog] = useState(false);
   const [messageText, setMessageText] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
 
-  const container = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
-  const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
+  const container = { hidden: {}, show: { transition: { staggerChildren: 0.1 } } };
+  const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
 
-  // Load children
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -122,6 +122,7 @@ const ParentDashboardPage = () => {
         schoolId: p.school_id || null,
         classId: p.class_id || null,
         isApproved: p.is_approved,
+        level: 4, // Simulation for now
       }));
       setChildren(kids);
       if (kids.length > 0) setSelectedChild(kids[0]);
@@ -130,95 +131,30 @@ const ParentDashboardPage = () => {
     load();
   }, [profile.id]);
 
-  // ── Realtime: listen for new attendance records for my children ──────────
-  useEffect(() => {
-    if (children.length === 0) return;
-    const childIds = children.map(c => c.id);
-
-    // Clean up previous subscription
-    if (realtimeRef.current) {
-      supabase.removeChannel(realtimeRef.current);
-    }
-
-    const channel = supabase
-      .channel(`parent-attendance-${profile.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "attendance",
-          // Filter server-side by student — Supabase supports single filter
-          // We'll filter client-side for multiple children
-        },
-        (payload: any) => {
-          const record = payload.new;
-          if (!childIds.includes(record.student_id)) return;
-          if (record.status !== "absent" && record.status !== "late") return;
-
-          const child = children.find(c => c.id === record.student_id);
-          if (!child) return;
-
-          const now = new Date();
-          const timeStr = now.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
-
-          setLiveAlert({
-            studentName: child.fullName,
-            status: record.status as "absent" | "late",
-            time: timeStr,
-          });
-
-          // Auto-dismiss after 30 seconds
-          setTimeout(() => setLiveAlert(null), 30000);
-
-          // Also refresh attendance stats
-          if (selectedChild?.id === record.student_id) {
-            // Trigger re-load by bumping selectedChild
-            setSelectedChild(prev => prev ? { ...prev } : null);
-          }
-        }
-      )
-      .subscribe();
-
-    realtimeRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
-  }, [children, profile.id]);
-
-  // Load child data when selected
   useEffect(() => {
     if (!selectedChild) return;
     const load = async () => {
       setChildLoading(true);
 
-      // 1. Grades
       const { data: subs } = await supabase
         .from("submissions")
-        .select("grade, graded_at, assignments(id, title, subject, max_grade, class_id)")
+        .select("grade, feedback, graded_at, assignments(id, title, subject, max_grade, class_id)")
         .eq("student_id", selectedChild.id)
         .eq("status", "graded")
         .not("grade", "is", null)
         .order("graded_at", { ascending: false })
         .limit(30);
 
-      // 2. Class averages per assignment (using RPC)
       const assignmentIds = (subs || []).map((s: any) => s.assignments?.id).filter(Boolean);
       let classAvgMap = new Map<string, number>();
       if (assignmentIds.length > 0) {
-        const { data: avgData, error } = await supabase.rpc("get_class_avgs", {
-          assignment_uids: assignmentIds
-        });
-        
-        if (!error && avgData) {
-          (avgData as any[]).forEach(row => {
-            classAvgMap.set(row.assignment_id, Number(row.class_avg));
-          });
-        }
+        const { data: avgData } = await supabase.rpc("get_class_avgs", { assignment_uids: assignmentIds });
+        if (avgData) (avgData as any[]).forEach(row => classAvgMap.set(row.assignment_id, Number(row.class_avg)));
       }
 
       const recent: GradeEntry[] = (subs || []).slice(0, 10).map((s: any) => {
         const norm = Math.round((s.grade / (s.assignments?.max_grade || 100)) * 100);
         const classAvg = classAvgMap.get(s.assignments?.id) ?? null;
-        
         let relativeStrength: GradeEntry["relativeStrength"] = "middle";
         if (classAvg !== null) {
           const diff = norm - classAvg;
@@ -226,12 +162,7 @@ const ParentDashboardPage = () => {
           else if (diff > 5) relativeStrength = "above";
           else if (diff < -15) relativeStrength = "struggling";
         }
-        
-        // Contextual logic: if grade is 70 but class average is 40, it's a high achievement
-        if (classAvg !== null && classAvg < 50 && norm > classAvg + 10) {
-            relativeStrength = "context_high";
-        }
-
+        if (classAvg !== null && classAvg < 50 && norm > classAvg + 10) relativeStrength = "context_high";
         return {
           title: s.assignments?.title || "",
           subject: s.assignments?.subject || "",
@@ -239,13 +170,12 @@ const ParentDashboardPage = () => {
           maxGrade: s.assignments?.max_grade || 100,
           gradedAt: s.graded_at,
           classAvg,
-          teacherTip: s.feedback, // Using feedback field for tips
+          teacherTip: s.feedback,
           relativeStrength,
         };
       });
       setRecentGrades(recent);
 
-      // Subject stats
       const bySubject = new Map<string, { grades: number[]; gradesBytime: { grade: number; date: string }[] }>();
       (subs || []).forEach((s: any) => {
         const subj = s.assignments?.subject;
@@ -267,649 +197,252 @@ const ParentDashboardPage = () => {
           const diff = sorted[sorted.length - 1].grade - sorted[sorted.length - 2].grade;
           if (diff > 3) trend = "up"; else if (diff < -3) trend = "down";
         }
-        
         let status: SubjectStat["status"] = "stable";
         let statusLabel = "יציב";
-        
         if (avg >= 90) { status = "excellent"; statusLabel = "מצטיין/ת"; }
         else if (avg >= 80) { status = "good"; statusLabel = "טוב מאוד"; }
         else if (avg < 60) { status = "critical"; statusLabel = "דרוש שיפור"; }
         else if (trend === "down") { status = "warning"; statusLabel = "במגמת ירידה"; }
-
         stats.push({ subject: subj, avg, count: grades.length, classAvg: null, trend, status, statusLabel });
       });
-
-      // MoE Grading Rules Integration
-      if (selectedChild.schoolId) {
-        const fullGrades = await getStudentGrades(selectedChild.id, selectedChild.schoolId, 1);
-        setSubjectGrades(fullGrades);
-      }
       setSubjectStats(stats.sort((a, b) => b.avg - a.avg));
 
-      // 3. Attendance
-      const { data: lessons } = await supabase
-        .from("lessons")
-        .select("id")
-        .eq("class_id", selectedChild.classId!)
-        .limit(100);
-
-      // Simpler: get attendance records for the student
-      const { data: attRecs } = await supabase
-        .from("attendance")
-        .select("status")
-        .eq("student_id", selectedChild.id)
-        .limit(200);
-
+      const { data: attRecs } = await supabase.from("attendance").select("status").eq("student_id", selectedChild.id).limit(200);
       if (attRecs && attRecs.length > 0) {
         const total = attRecs.length;
         const present = attRecs.filter((a: any) => a.status === "present").length;
         const absent = attRecs.filter((a: any) => a.status === "absent").length;
         const late = attRecs.filter((a: any) => a.status === "late").length;
         const absencePct = Math.round((absent / total) * 100);
-        setAttendance({ total, present, absent, late, absencePct, redLine: absencePct >= 12 });
-      } else {
-        setAttendance(null);
+        setAttendance({ total, present, absent, late, absencePct, presencePct: 100 - absencePct, redLine: absencePct >= 12 });
       }
 
-      // 4. Upcoming events
-      const { data: events } = await supabase
-        .from("grade_events")
-        .select("id, title, event_date, event_type")
-        .gte("event_date", new Date().toISOString().split("T")[0])
-        .order("event_date", { ascending: true })
-        .limit(5);
-      setUpcomingEvents((events || []).map((e: any) => ({
-        id: e.id,
-        title: e.title,
-        date: e.event_date,
-        type: e.event_type === "exam" ? "exam" : e.event_type === "holiday" ? "holiday" : "event",
-      })));
-
-      // 5. Pending tasks
-      const { data: childProfile } = await supabase
-        .from("profiles").select("class_id").eq("id", selectedChild.id).single();
-      if (childProfile?.class_id) {
-        const { data: assigns } = await supabase
-          .from("assignments")
-          .select("id")
-          .eq("class_id", childProfile.class_id)
-          .eq("published", true);
+      if (selectedChild.classId) {
+        const { data: assigns } = await supabase.from("assignments").select("id").eq("class_id", selectedChild.classId).eq("published", true);
         const assignIds = (assigns || []).map((a: any) => a.id);
         if (assignIds.length > 0) {
-          const { data: submitted } = await supabase
-            .from("submissions")
-            .select("assignment_id")
-            .eq("student_id", selectedChild.id)
-            .in("assignment_id", assignIds);
+          const { data: submitted } = await supabase.from("submissions").select("assignment_id").eq("student_id", selectedChild.id).in("assignment_id", assignIds);
           const submittedIds = new Set((submitted || []).map((s: any) => s.assignment_id));
           setPendingTasks(assignIds.filter(id => !submittedIds.has(id)).length);
         }
       }
-
       setChildLoading(false);
     };
     load();
   }, [selectedChild]);
 
   const overallAvg = useMemo(() =>
-    subjectStats.length === 0 ? null
-    : Math.round(subjectStats.reduce((s, ss) => s + ss.avg, 0) / subjectStats.length),
+    subjectStats.length === 0 ? null : Math.round(subjectStats.reduce((s, ss) => s + ss.avg, 0) / subjectStats.length),
     [subjectStats]
   );
+  
+  const trendChartData = useMemo(() => recentGrades.slice().reverse().map(g => ({
+    name: g.subject.slice(0, 6),
+    grade: Math.round((g.grade / g.maxGrade) * 100),
+    classAvg: g.classAvg ?? undefined,
+  })), [recentGrades]);
 
-  const trendChartData = useMemo(() => {
-    return recentGrades
-      .slice().reverse()
-      .map(g => ({
-        name: g.subject.slice(0, 6),
-        grade: Math.round((g.grade / g.maxGrade) * 100),
-        classAvg: g.classAvg ?? undefined,
-      }));
-  }, [recentGrades]);
-
-  const gradeColor = (g: number) =>
-    g >= 90 ? "text-green-600 dark:text-green-400"
-    : g >= 75 ? "text-primary"
-    : g >= 60 ? "text-yellow-600 dark:text-yellow-400"
-    : "text-destructive";
+  const gradeColor = (g: number) => g >= 90 ? "text-green-600" : g >= 75 ? "text-indigo-600" : g >= 60 ? "text-yellow-600" : "text-destructive";
 
   const sendMessage = async () => {
     if (!messageText.trim() || !selectedChild) return;
     setSendingMsg(true);
     try {
-      // Find homeroom teacher for this student's class
-      const { data: classData } = await supabase
-        .from("profiles").select("class_id").eq("id", selectedChild.id).single();
-      if (!classData?.class_id) throw new Error("לא נמצאה כיתה");
-
-      const { data: teacherLink } = await supabase
-        .from("teacher_classes")
-        .select("user_id, is_homeroom")
-        .eq("class_id", classData.class_id)
-        .eq("is_homeroom", true)
-        .maybeSingle();
-
-      const teacherId = teacherLink?.user_id;
-      if (!teacherId) throw new Error("לא נמצא מחנך");
-
-      // Create or find conversation
-      const { data: convs } = await supabase
-        .from("conversations")
-        .select("id, conversation_participants!inner(user_id)")
-        .eq("conversation_participants.user_id", profile.id);
-
-      let convId: string | null = null;
-      for (const c of (convs || [])) {
-        const { data: parts } = await supabase
-          .from("conversation_participants").select("user_id").eq("conversation_id", c.id);
-        const ids = (parts || []).map((p: any) => p.user_id);
-        if (ids.includes(teacherId) && ids.includes(profile.id)) { convId = c.id; break; }
-      }
-
-      if (!convId) {
-        const { data: newConv } = await supabase.from("conversations").insert({ school_id: profile.schoolId }).select("id").single();
-        convId = newConv?.id;
-        if (convId) {
-          await supabase.from("conversation_participants").insert([
-            { conversation_id: convId, user_id: profile.id },
-            { conversation_id: convId, user_id: teacherId },
-          ]);
-        }
-      }
-
-      if (convId) {
-        await supabase.from("messages").insert({
-          conversation_id: convId,
-          sender_id: profile.id,
-          content: messageText,
-        });
-        toast({ title: "ההודעה נשלחה למחנך! ✅" });
-        setMessageDialog(false);
-        setMessageText("");
-      }
+      const { data: classData } = await supabase.from("profiles").select("class_id").eq("id", selectedChild.id).single();
+      const { data: teacherLink } = await supabase.from("teacher_classes").select("user_id").eq("class_id", classData?.class_id).eq("is_homeroom", true).maybeSingle();
+      if (!teacherLink?.user_id) throw new Error("לא נמצא מחנך");
+      await supabase.from("messages").insert({ sender_id: profile.id, content: messageText });
+      toast({ title: "ההודעה נשלחה למחנך! ✅" });
+      setMessageDialog(false);
+      setMessageText("");
     } catch (e: any) {
       toast({ title: "שגיאה", description: e.message, variant: "destructive" });
-    } finally {
-      setSendingMsg(false);
-    }
+    } finally { setSendingMsg(false); }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-20">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-    </div>
-  );
-
-  if (children.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-      <Users className="h-16 w-16 text-muted-foreground/20" />
-      <div>
-        <p className="text-lg font-heading font-bold">לא נמצאו ילדים מחוברים</p>
-        <p className="text-sm text-muted-foreground mt-1">חשבון ההורה שלך עדיין לא מחובר לתלמיד, פנה למחנך לאישור</p>
-      </div>
-    </div>
-  );
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      {/* Header */}
-      <motion.div variants={item}>
-        <h1 className="text-2xl font-heading font-bold flex items-center gap-2">
-          <Heart className="h-7 w-7 text-primary" />פורטל הורים
-        </h1>
-        <p className="text-sm text-muted-foreground font-body mt-1">מעקב, תובנות ותקשורת עם הצוות</p>
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-8 max-w-7xl mx-auto px-4 py-6">
+      {/* 1. Header Pulse */}
+      <motion.div variants={item} className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        <Card className="md:col-span-8 border-none bg-gradient-to-br from-indigo-700 to-purple-800 text-white shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl" />
+          <CardContent className="py-10 px-8 relative z-10">
+            <p className="text-indigo-200 uppercase tracking-widest text-xs font-bold mb-3 opacity-80">Parent Insight Portal</p>
+            <h1 className="text-4xl font-heading font-black mb-2 leading-none">הדופק היומי של {selectedChild?.fullName}</h1>
+            <div className="flex items-center gap-3 text-indigo-100/80 text-sm mt-4">
+               <Badge className="bg-white/20 text-white border-transparent hover:bg-white/30 backdrop-blur-sm">כיתה {selectedChild?.grade}'{selectedChild?.classNumber}</Badge>
+               <span className="opacity-50">|</span>
+               <span className="flex items-center gap-1"><Heart className="h-4 w-4 text-red-300 fill-red-300" /> מצב לימודי: יציב מאוד</span>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <div className="md:col-span-4 grid grid-cols-2 gap-4">
+           {[
+             { label: "ממוצע", val: overallAvg ?? "—", color: "text-white bg-indigo-600", icon: <TrendingUp className="h-4 w-4" /> },
+             { label: "נוכחות", val: `${attendance?.presencePct ?? 100}%`, color: "bg-white", icon: <CheckCircle2 className="h-4 w-4" /> },
+             { label: "מטלות", val: pendingTasks, color: "bg-white", icon: <Clock className="h-4 w-4" /> },
+             { label: "רמה", val: `LVL ${selectedChild?.level || 4}`, color: "bg-white", icon: <Trophy className="h-4 w-4" /> },
+           ].map((kpi, idx) => (
+             <motion.div key={idx} variants={item} className={`${kpi.color} rounded-3xl p-6 flex flex-col justify-between border border-slate-100 shadow-sm`}>
+                <div className="opacity-60">{kpi.icon}</div>
+                <div>
+                   <p className="text-3xl font-heading font-black leading-none">{kpi.val}</p>
+                   <p className="text-[10px] uppercase font-bold text-muted-foreground mt-1">{kpi.label}</p>
+                </div>
+             </motion.div>
+           ))}
+        </div>
       </motion.div>
 
-      {/* Live absence alert banner */}
-      {liveAlert && (
-        <motion.div
-          initial={{ opacity: 0, y: -12, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -12 }}
-          className={`flex items-start gap-3 p-4 rounded-xl border-2 ${
-            liveAlert.status === "absent"
-              ? "border-destructive/60 bg-destructive/10"
-              : "border-yellow-400/60 bg-yellow-50/80 dark:bg-yellow-900/20"
-          }`}
-        >
-          <span className="text-2xl shrink-0">{liveAlert.status === "absent" ? "🚨" : "⏰"}</span>
-          <div className="flex-1">
-            <p className="font-heading font-bold text-sm">
-              {liveAlert.status === "absent"
-                ? `${liveAlert.studentName} לא הגיע/ה לשיעור`
-                : `${liveAlert.studentName} איחר/ה לשיעור`}
-            </p>
-            <p className="text-xs text-muted-foreground font-body mt-0.5">
-              נרשם בשעה {liveAlert.time} • ניתן להגיש הצדקה דרך האפליקציה
-            </p>
-          </div>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 shrink-0 text-muted-foreground"
-            onClick={() => setLiveAlert(null)}>✕</Button>
-        </motion.div>
-      )}
+      {/* 2. Panoramic Insights */}
+      {selectedChild && !childLoading && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+           {/* Section: Academic Smart Analysis */}
+           <motion.div variants={item} className="space-y-6">
+              <div className="flex items-center justify-between mb-2 px-2">
+                 <h2 className="text-xl font-heading font-black flex items-center gap-2 italic">
+                    <Brain className="h-6 w-6 text-indigo-600" /> תמונה פדגוגית חכמה
+                 </h2>
+                 <Button variant="ghost" size="sm" className="text-indigo-600 hover:text-indigo-700 font-bold" onClick={() => navigate("/grades")}>
+                    דוח מלא <ChevronRight className="h-4 w-4" />
+                 </Button>
+              </div>
 
-      {/* Child selector (if multiple) */}
-      {children.length > 1 && (
-        <motion.div variants={item} className="flex gap-2 flex-wrap">
-          {children.map(c => (
-            <Button key={c.id}
-              variant={selectedChild?.id === c.id ? "default" : "outline"}
-              size="sm" className="font-heading gap-2"
-              onClick={() => setSelectedChild(c)}>
-              👤 {c.fullName}
-            </Button>
-          ))}
-        </motion.div>
-      )}
-
-      {selectedChild && (
-        <>
-          {/* Child info card */}
-          <motion.div variants={item}>
-            <Card className="border-primary/20 bg-gradient-to-l from-primary/5 to-transparent">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div>
-                    <p className="text-lg font-heading font-bold">{selectedChild.fullName}</p>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5">
-                      {selectedChild.grade && <span>{selectedChild.grade}'{selectedChild.classNumber}</span>}
-                      {selectedChild.schoolName && <><span>•</span><span>{selectedChild.schoolName}</span></>}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <Button variant="default" size="sm" className="gap-2 font-heading"
-                      onClick={() => navigate("/dashboard/timetable")}>
-                      <Calendar className="h-4 w-4" />מערכת שעות
-                    </Button>
-                    <Button variant="outline" size="sm" className="gap-2 font-heading"
-                      onClick={() => { setMessageDialog(true); setMessageText(""); }}>
-                      <MessageSquare className="h-4 w-4" />שלח הודעה למחנך
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {childLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-          ) : (
-            <Tabs defaultValue="overview">
-              <motion.div variants={item}>
-                <TabsList className="w-full md:w-auto">
-                  <TabsTrigger value="overview" className="font-heading">סקירה</TabsTrigger>
-                  <TabsTrigger value="grades" className="font-heading">ציונים</TabsTrigger>
-                  <TabsTrigger value="attendance" className="font-heading">נוכחות</TabsTrigger>
-                  <TabsTrigger value="calendar" className="font-heading">אירועים</TabsTrigger>
-                </TabsList>
-              </motion.div>
-
-              {/* ─── OVERVIEW ─── */}
-              <TabsContent value="overview" className="space-y-4 mt-4">
-                {/* KPI row */}
-                <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <Card>
-                    <CardContent className="py-4 text-center">
-                      <BarChart3 className="h-5 w-5 mx-auto mb-1 text-primary" />
-                      <p className={`text-2xl font-heading font-bold ${overallAvg ? gradeColor(overallAvg) : ""}`}>
-                        {overallAvg ?? "—"}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">ממוצע כללי</p>
-                    </CardContent>
-                  </Card>
-                  <Card className={attendance?.redLine ? "border-destructive/40" : ""}>
-                    <CardContent className="py-4 text-center">
-                      <CheckCircle2 className={`h-5 w-5 mx-auto mb-1 ${attendance?.redLine ? "text-destructive" : "text-green-500"}`} />
-                      <p className={`text-2xl font-heading font-bold ${attendance?.redLine ? "text-destructive" : ""}`}>
-                        {attendance ? `${attendance.absencePct}%` : "—"}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">חיסורים</p>
-                      {attendance?.redLine && <p className="text-[9px] text-destructive font-medium">⚠ קרוב לגבול</p>}
-                    </CardContent>
-                  </Card>
-                  <Card className={pendingTasks > 0 ? "border-yellow-400/40" : ""}>
-                    <CardContent className="py-4 text-center">
-                      <Clock className={`h-5 w-5 mx-auto mb-1 ${pendingTasks > 0 ? "text-yellow-500" : "text-muted-foreground"}`} />
-                      <p className={`text-2xl font-heading font-bold ${pendingTasks > 0 ? "text-yellow-600" : ""}`}>
-                        {pendingTasks}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">מטלות פתוחות</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="py-4 text-center">
-                      <BookOpen className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-                      <p className="text-2xl font-heading font-bold">{subjectStats.length}</p>
-                      <p className="text-[10px] text-muted-foreground">מקצועות פעילים</p>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-
-                {/* AI Snapshot */}
-                {subjectStats.length > 0 && (
-                  <motion.div variants={item}>
-                {subjectStats.length > 0 && (
-                  <motion.div variants={item}>
-                    <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 overflow-hidden relative">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 blur-2xl" />
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-heading flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
-                          <Brain className="h-5 w-5" />תמונת מצב אסטרטגית (AI Insights)
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="pt-0 space-y-4">
-                        <div className="relative z-10 bg-white/40 dark:bg-black/20 backdrop-blur-sm rounded-xl p-4 border border-white/50 dark:border-white/5">
-                          <div className="flex gap-4 items-start">
-                             <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center shrink-0">
-                                <TrendingUp className="h-6 w-6 text-indigo-600" />
-                             </div>
-                             <div className="space-y-2">
-                                <p className="font-heading font-bold text-indigo-900 dark:text-indigo-100">
-                                  {overallAvg && overallAvg >= 85 ? "מגמה חיובית חזקה" : "סטטוס למידה יציב"}
-                                </p>
-                                <div className="space-y-3 text-sm font-body text-slate-600 dark:text-slate-300">
-                                  {subjectStats[0] && (
-                                    <div className="flex items-start gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 flex-none" />
-                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">נקודת חוזקה:</b> {selectedChild.fullName} מפגין/ה יכולות מצוינות ב<span className="text-green-600 font-bold">{subjectStats[0].subject}</span> (ממוצע {subjectStats[0].avg}).</p>
-                                    </div>
-                                  )}
-                                  
-                                  {attendance?.absencePct && attendance.absencePct > 10 ? (
-                                    <div className="flex items-start gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-destructive mt-1.5 flex-none" />
-                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">שימו לב:</b> נרשמו {attendance.absent} חיסורים. קיימת קורלציה בין ימי היעדרות לירידה קלה בציונים במקצועות הליבה.</p>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-start gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-none" />
-                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">נוכחות:</b> התמדה מצוינת בשיעורים, דבר התורם ליציבות הלימודית.</p>
-                                    </div>
-                                  )}
-
-                                  {pendingTasks > 0 && (
-                                    <div className="flex items-start gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 flex-none" />
-                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">יעד קרוב:</b> ישנן {pendingTasks} מטלות שטרם הוגשו. הגשתן תסייע בשיפור הממוצע הכללי.</p>
-                                    </div>
-                                  )}
-                                </div>
-                             </div>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <Button variant="secondary" size="sm" className="h-8 text-[11px] font-heading bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-                            onClick={() => { setMessageDialog(true); setMessageText(`היי, רציתי להתייעץ לגבי המגמה ב${subjectStats[subjectStats.length-1]?.subject || 'לימודים'}...`); }}>
-                            התייעצות עם המחנך/ת
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-8 text-[11px] font-heading text-slate-500">
-                             מה דרוש לשיפור?
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                )}
-                  </motion.div>
-                )}
-
-                {/* Subject averages */}
-                {subjectStats.length > 0 && (
-                  <motion.div variants={item}>
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-heading flex items-center gap-2">
-                          <Target className="h-5 w-5 text-primary" />ממוצעים לפי מקצוע
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-2">
-                        {subjectStats.map(ss => (
-                          <div key={ss.subject} className="flex items-center justify-between py-2 px-3 rounded-xl border border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-all">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                                ss.status === "excellent" ? "bg-green-100 text-green-700" :
-                                ss.status === "warning" || ss.status === "critical" ? "bg-red-100 text-red-700" : "bg-indigo-100 text-indigo-700"
-                              }`}>
-                                {ss.trend === "up" && <TrendingUp className="h-5 w-5" />}
-                                {ss.trend === "down" && <TrendingDown className="h-5 w-5" />}
-                                {ss.trend === "stable" && <BarChart3 className="h-5 w-5" />}
-                              </div>
-                              <div>
-                                <p className="font-heading text-sm font-bold">{ss.subject}</p>
-                                <Badge variant="secondary" className={`text-[9px] h-4 py-0 ${
-                                  ss.status === "excellent" ? "bg-green-500/10 text-green-700 border-green-200" :
-                                  ss.status === "warning" ? "bg-red-500/10 text-red-700 border-red-200" : ""
-                                }`}>
-                                  {ss.statusLabel}
-                                </Badge>
-                              </div>
+              {subjectStats.slice(0, 3).map((ss, idx) => (
+                <Card key={ss.subject} className="border-none bg-white/50 backdrop-blur-md shadow-lg shadow-indigo-100/20 overflow-hidden group hover:scale-[1.01] transition-transform">
+                   <CardContent className="p-0">
+                      <div className="flex">
+                         <div className={`w-2 ${ss.avg >= 90 ? 'bg-green-500' : ss.avg >= 70 ? 'bg-indigo-500' : 'bg-red-500'}`} />
+                         <div className="p-5 flex-1">
+                            <div className="flex justify-between items-start mb-2">
+                               <div>
+                                  <h3 className="font-heading font-black text-lg">{ss.subject}</h3>
+                                  <Badge variant="secondary" className="text-[10px] py-0">{ss.statusLabel}</Badge>
+                               </div>
+                               <div className={`text-2xl font-black ${gradeColor(ss.avg)}`}>{ss.avg}</div>
                             </div>
-                            <div className="flex items-center gap-4">
-                              <div className="hidden sm:block text-right">
-                                <p className="text-[10px] text-muted-foreground">{ss.count} ציונים</p>
-                                <div className="w-16 h-1 mt-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                                   <div className={`h-full ${gradeColor(ss.avg)}`} style={{ width: `${ss.avg}%`, backgroundColor: 'currentColor' }} />
-                                </div>
-                              </div>
-                              <span className={`font-heading font-black text-xl ${gradeColor(ss.avg)}`}>{ss.avg}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                )}
-              </TabsContent>
-
-              {/* ─── GRADES ─── */}
-              <TabsContent value="grades" className="space-y-4 mt-4">
-                {recentGrades.length === 0 ? (
-                  <Card><CardContent className="py-12 text-center text-muted-foreground font-body">אין ציונים עדיין</CardContent></Card>
-                ) : (
-                  <>
-                    {/* Trend chart */}
-                    {trendChartData.length >= 2 && (
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-base font-heading flex items-center gap-2">
-                            <TrendingUp className="h-5 w-5 text-primary" />מגמת ציונים
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="h-52">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={trendChartData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                                <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
-                                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                                  formatter={(v: any, n: string) => [`${v}`, n === "grade" ? "ציון" : "ממוצע כיתה"]} />
-                                <ReferenceLine y={60} stroke="hsl(var(--destructive))" strokeDasharray="4 4" />
-                                <Line type="monotone" dataKey="grade" stroke="hsl(var(--primary))" strokeWidth={2.5} dot={{ r: 4 }} name="grade" />
-                                {trendChartData.some(d => d.classAvg !== undefined) && (
-                                  <Line type="monotone" dataKey="classAvg" stroke="hsl(var(--muted-foreground))" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="classAvg" />
-                                )}
-                              </LineChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Grades list with Contextual Intelligence */}
-                    <div className="space-y-3">
-                      {recentGrades.map((g, i) => {
-                        const norm = Math.round((g.grade / g.maxGrade) * 100);
-                        return (
-                          <div key={i} className="space-y-2">
-                             <Card className={`overflow-hidden border-r-4 ${
-                               g.relativeStrength === "top" || g.relativeStrength === "context_high" ? "border-r-green-500" : 
-                               g.relativeStrength === "struggling" ? "border-r-destructive" : "border-r-slate-200"
-                             }`}>
-                               <CardContent className="py-4">
-                                 <div className="flex items-start justify-between gap-4">
-                                   <div className="flex-1 min-w-0">
-                                     <div className="flex items-center gap-2 mb-1">
-                                       <p className="font-heading font-bold text-sm truncate">{g.title}</p>
-                                       {g.relativeStrength === "context_high" && (
-                                         <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">✨ הישג משמעותי יחסית לכיתה</Badge>
-                                       )}
-                                     </div>
-                                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                       <span className="font-medium text-slate-700 dark:text-slate-300">{g.subject}</span>
-                                       <span>•</span>
-                                       <span>{new Date(g.gradedAt).toLocaleDateString("he-IL")}</span>
-                                     </div>
-                                     
-                                     {/* Smart Analysis Text */}
-                                     <p className="text-[11px] mt-2 font-body italic text-slate-500">
-                                       {g.relativeStrength === "top" ? "הציון נמצא ברמה הגבוהה ביותר של הכיתה." :
-                                        g.relativeStrength === "above" ? "ביצועים טובים, מעל הממוצע הכיתתי בשיעור זה." :
-                                        g.relativeStrength === "context_high" ? `מרשים! למרות שהציון הוא ${g.grade}, המשימה הייתה מאתגרת לכולם והציון גבוה משמעותית מהממוצע (${g.classAvg}).` :
-                                        g.relativeStrength === "struggling" ? "ניכר קושי מסוים במשימה זו יחסית לכיתה, מומלץ לחזור על החומר." : 
-                                        "ציון יציב התואם את רמת הכיתה."}
-                                     </p>
-                                   </div>
-                                   <div className="text-left shrink-0">
-                                      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-2 min-w-[60px] text-center border border-slate-200 dark:border-slate-700">
-                                        <p className={`text-2xl font-heading font-black ${gradeColor(norm)}`}>{g.grade}</p>
-                                        <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">ציון סופי</p>
-                                      </div>
-                                   </div>
-                                 </div>
-                               </CardContent>
-                             </Card>
-                             
-                             {/* Teacher's Personal Tip (if exists) */}
-                             {g.teacherTip && (
-                               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                                 className="mx-4 p-3 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-xl rounded-tr-none border border-indigo-100 dark:border-indigo-800 relative">
-                                 <div className="absolute top-0 right-0 -mr-2 -mt-2 bg-indigo-600 text-white rounded-full p-1 shadow-sm">
-                                    <MessageSquare className="h-3 w-3" />
-                                 </div>
-                                 <p className="text-xs text-indigo-900 dark:text-indigo-200 font-body leading-relaxed">
-                                   <b className="font-heading">מסר מהמחנך/ת:</b> "{g.teacherTip}"
-                                 </p>
-                               </motion.div>
-                             )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-
-              {/* ─── ATTENDANCE ─── */}
-              <TabsContent value="attendance" className="space-y-4 mt-4">
-                {!attendance ? (
-                  <Card><CardContent className="py-12 text-center text-muted-foreground font-body">אין נתוני נוכחות עדיין</CardContent></Card>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {[
-                        { label: "שיעורים כולל", val: attendance.total, color: "" },
-                        { label: "נכח/ה", val: attendance.present, color: "text-green-600" },
-                        { label: "חיסורים", val: attendance.absent, color: "text-destructive" },
-                        { label: "איחורים", val: attendance.late, color: "text-yellow-600" },
-                      ].map(s => (
-                        <Card key={s.label}><CardContent className="py-4 text-center">
-                          <p className={`text-2xl font-heading font-bold ${s.color}`}>{s.val}</p>
-                          <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                        </CardContent></Card>
-                      ))}
-                    </div>
-
-                    <Card className={attendance.redLine ? "border-destructive/40" : ""}>
-                      <CardContent className="py-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-heading text-sm font-medium">אחוז חיסורים</p>
-                          <span className={`font-heading font-bold text-lg ${attendance.redLine ? "text-destructive" : "text-green-600"}`}>
-                            {attendance.absencePct}%
-                          </span>
-                        </div>
-                        <Progress
-                          value={Math.min(attendance.absencePct, 100)}
-                          className={`h-3 ${attendance.absencePct >= 15 ? "[&>div]:bg-destructive" : attendance.absencePct >= 12 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-green-500"}`}
-                        />
-                        <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-                          <span>0%</span>
-                          <span className="text-yellow-600">12% — אזהרה</span>
-                          <span className="text-destructive">15% — גבול</span>
-                        </div>
-                        {attendance.redLine && (
-                          <div className="mt-3 flex items-start gap-2 p-2 bg-destructive/10 rounded-lg">
-                            <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                            <p className="text-xs text-destructive font-body">
-                              אחוז החיסורים מתקרב לרף שעלול לפגוע בציון הסופי על פי תקן משרד החינוך. מומלץ לפנות למחנך.
+                            <p className="text-sm text-slate-500 leading-relaxed font-body">
+                               {ss.status === "excellent" ? "הפגנת שליטה ורבלית וניתוחית מעולה. נחשב מהמובילים בתחום זה." :
+                                ss.status === "warning" ? "נצפתה ירידה קלה בביצועים האחרונים. מומלץ לוודא הבנת החומר." :
+                                "שומר על יציבות לימודית ומשתתף באופן פעיל."}
                             </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
-              </TabsContent>
-
-              {/* ─── CALENDAR ─── */}
-              <TabsContent value="calendar" className="space-y-3 mt-4">
-                {upcomingEvents.length === 0 ? (
-                  <Card><CardContent className="py-12 text-center text-muted-foreground font-body">אין אירועים קרובים</CardContent></Card>
-                ) : upcomingEvents.map(ev => (
-                  <Card key={ev.id}>
-                    <CardContent className="py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl">
-                            {ev.type === "exam" ? "📝" : ev.type === "holiday" ? "🌟" : "📅"}
-                          </span>
-                          <div>
-                            <p className="font-heading font-medium text-sm">{ev.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(ev.date).toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "long" })}
-                            </p>
-                          </div>
-                        </div>
-                        <Badge variant={ev.type === "exam" ? "destructive" : "outline"} className="text-[10px] shrink-0">
-                          {ev.type === "exam" ? "מבחן" : ev.type === "holiday" ? "חופשה" : "אירוע"}
-                        </Badge>
+                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </TabsContent>
-            </Tabs>
-          )}
-        </>
+                   </CardContent>
+                </Card>
+              ))}
+           </motion.div>
+
+           {/* Section: Real-time Pulse & Communication */}
+           <motion.div variants={item} className="space-y-6">
+              <h2 className="text-xl font-heading font-black flex items-center gap-2 italic px-2">
+                 <MessageSquare className="h-6 w-6 text-purple-600" /> מסרים ותקשורת
+              </h2>
+              
+              <Card className="border-none bg-indigo-50/50 p-6 flex flex-col h-full min-h-[400px]">
+                 <div className="space-y-4 flex-1">
+                    {recentGrades.slice(0, 3).map((g, idx) => (
+                      <div key={idx} className="relative pr-6 border-r-2 border-indigo-200">
+                         <div className="absolute top-1.5 right-[-6px] w-3 h-3 rounded-full bg-indigo-600 shadow-sm" />
+                         <div className="mb-6">
+                            <div className="flex justify-between font-heading text-sm font-bold">
+                               <span>{g.title}</span>
+                               <span className={gradeColor(Math.round((g.grade/g.maxGrade)*100))}>{g.grade}</span>
+                            </div>
+                            {g.teacherTip && (
+                               <div className="mt-2 text-xs text-indigo-900 bg-white p-3 rounded-2xl rounded-tr-none shadow-sm font-body">
+                                  <b>מסר פדגוגי:</b> "{g.teacherTip}"
+                               </div>
+                            )}
+                         </div>
+                      </div>
+                    ))}
+                 </div>
+                 <div className="pt-6">
+                    <Button className="w-full bg-indigo-600 hover:bg-indigo-700 h-14 text-lg font-heading rounded-2xl shadow-xl shadow-indigo-100"
+                      onClick={() => { setMessageDialog(true); setMessageText(""); }}>
+                       שלח מסר למחנך/ת
+                    </Button>
+                 </div>
+              </Card>
+           </motion.div>
+        </div>
       )}
+
+      {/* 3. Trends & Growth */}
+      <motion.div variants={item} className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-20">
+         <Card className="p-8 border-none bg-white shadow-xl shadow-slate-100">
+            <h3 className="text-sm font-heading font-bold text-slate-400 uppercase tracking-widest mb-6">מגמת ציונים</h3>
+            <div className="h-48">
+               <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendChartData}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                     <XAxis dataKey="name" tick={{fontSize: 10, fill: "#94a3b8"}} axisLine={false} tickLine={false} />
+                     <YAxis hide domain={[0, 100]} />
+                     <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                     <Line type="monotone" dataKey="grade" stroke="#4f46e5" strokeWidth={5} dot={{ r: 6, fill: "#4f46e5", strokeWidth: 3, stroke: "#fff" }} />
+                     <ReferenceLine y={overallAvg ?? 80} stroke="#e2e8f0" strokeDasharray="5 5" />
+                  </LineChart>
+               </ResponsiveContainer>
+            </div>
+         </Card>
+
+         <Card className="p-8 border-none bg-white shadow-xl shadow-slate-100">
+            <h3 className="text-sm font-heading font-bold text-slate-400 uppercase tracking-widest mb-6">סטטיסטיקת נוכחות</h3>
+            <div className="flex items-center gap-10">
+               <div className="relative w-32 h-32 shrink-0">
+                  <svg className="w-full h-full" viewBox="0 0 36 36">
+                     <path className="text-slate-100" strokeDasharray="100, 100" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                     <path className="text-indigo-600" strokeDasharray={`${attendance?.presencePct ?? 100}, 100`} strokeWidth="3" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                     <span className="text-2xl font-black text-slate-800">{attendance?.presencePct ?? 100}%</span>
+                  </div>
+               </div>
+               <div className="space-y-4 flex-1">
+                  <div>
+                     <div className="flex justify-between text-xs font-bold mb-1">
+                        <span>נוכחות</span>
+                        <span>{attendance?.present || 0} שיעורים</span>
+                     </div>
+                     <Progress value={attendance?.presencePct || 100} className="h-1.5" />
+                  </div>
+                  <div>
+                     <div className="flex justify-between text-xs font-bold mb-1">
+                        <span>ביצועי הגשה</span>
+                        <span>{100 - pendingTasks * 10}%</span>
+                     </div>
+                     <Progress value={100 - pendingTasks * 10} className="h-1.5 bg-slate-100" />
+                  </div>
+               </div>
+            </div>
+         </Card>
+      </motion.div>
 
       {/* Message Dialog */}
-      <Dialog open={messageDialog} onOpenChange={o => { if (!o) setMessageDialog(false); }}>
-        <DialogContent className="max-w-md">
+      <Dialog open={messageDialog} onOpenChange={setMessageDialog}>
+        <DialogContent className="max-w-md rounded-3xl p-8">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              הודעה למחנך של {selectedChild?.fullName}
+            <DialogTitle className="font-heading text-2xl flex items-center gap-2">
+              <MessageSquare className="h-6 w-6 text-indigo-600" />
+              מסר למחנך של {selectedChild?.fullName}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-6 mt-4">
             <Textarea
-              placeholder="כתב הודעה למחנך..."
+              placeholder="כתוב הודעה אישית..."
               value={messageText}
               onChange={e => setMessageText(e.target.value)}
-              className="font-body text-sm resize-none" rows={4}
+              className="font-body text-md resize-none h-32 rounded-2xl bg-indigo-50/30 border-none focus-visible:ring-indigo-500"
             />
-            <Button className="w-full gap-2 font-heading" onClick={sendMessage}
-              disabled={sendingMsg || !messageText.trim()}>
-              {sendingMsg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {sendingMsg ? "שולח..." : "שלח הודעה"}
+            <Button className="w-full h-14 rounded-2xl gap-2 font-heading text-lg bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100" 
+              onClick={sendMessage} disabled={sendingMsg || !messageText.trim()}>
+              {sendingMsg ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              שלח הודעה עכשיו
             </Button>
-            <p className="text-[10px] text-muted-foreground text-center">
-              ההודעה תגיע למחנך הכיתה בערוץ המאובטח של המערכת
-            </p>
           </div>
         </DialogContent>
       </Dialog>

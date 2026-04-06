@@ -93,7 +93,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     { title: "קהילה", url: "/dashboard/community", icon: Users },
   ];
 
-  // Teacher navigation (professional teacher / subject coordinator)
+  // Teacher navigation
   const teacherItems: { title: string; url: string; icon: any }[] = [
     { title: "דאשבורד", url: "/dashboard/teacher-home", icon: LayoutDashboard },
     { title: "שיעור חי", url: "/dashboard/live-lesson", icon: Radio },
@@ -110,62 +110,52 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     teacherItems.push({ title: "שיבוץ מורים", url: "/dashboard/assign-teachers", icon: GraduationCap });
     teacherItems.push({ title: "תכנון סילבוס", url: "/dashboard/syllabus-planner", icon: BookOpen });
   }
-  if (hasApprovalPower) {
-    teacherItems.push({ title: "אישורים", url: "/dashboard/approvals", icon: UserCheck });
-  }
 
-  // Grade coordinator navigation
+  // Grade coordinator
   const gradeCoordinatorItems: { title: string; url: string; icon: any }[] = [
     { title: "דאשבורד", url: "/dashboard/grade-coordinator-home", icon: LayoutDashboard },
     { title: "לוח מבחנים", url: "/dashboard/master-scheduler", icon: Calendar },
     { title: "דופק שכבתי", url: "/dashboard/grade-progress", icon: BarChart3 },
     { title: "לוח זמנים", url: "/dashboard/schedule", icon: Calendar },
-    { title: "תגבורים", url: "/dashboard/tutoring", icon: Users },
-    { title: "ישיבות צוות", url: "/dashboard/staff-meetings", icon: ClipboardList },
-    { title: "הודעות", url: "/dashboard/grade-announcements", icon: Bell },
     { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
-    { title: "אישורים", url: "/dashboard/approvals", icon: UserCheck },
   ];
 
-  // Management/admin navigation
+  // Parent Navigation (CLEAN & PREMIUM)
+  const parentItems = [
+    { title: "דף הבית", url: "/dashboard/my-child", icon: LayoutDashboard },
+    { title: "דוחות וציונים", url: "/dashboard/parent-grades", icon: BarChart3 },
+    { title: "מערכת שעות", url: "/dashboard/schedule", icon: Calendar },
+    { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
+    { title: "מגן זכויות", url: "/dashboard/rights", icon: Shield },
+  ];
+
+  // Admin/Management
   const adminItems: { title: string; url: string; icon: any }[] = [
     { title: "דאשבורד", url: "/dashboard", icon: LayoutDashboard },
   ];
 
-  if (hasApprovalPower) {
-    adminItems.push({ title: "אישורים", url: "/dashboard/approvals", icon: UserCheck });
-  }
+  if (hasApprovalPower) adminItems.push({ title: "אישורים", url: "/dashboard/approvals", icon: UserCheck });
   if (isStaff) {
     adminItems.push({ title: "תלמידים", url: "/dashboard/students", icon: GraduationCap });
     adminItems.push({ title: "כיתות", url: "/dashboard/classes", icon: BookOpen });
   }
-  if (isEducator) {
-    teacherItems.push({ title: "ניהול מפה", url: "/dashboard/seating", icon: LayoutDashboard });
-    adminItems.push({ title: "ניהול מפה", url: "/dashboard/seating", icon: LayoutDashboard });
-    adminItems.push({ title: "הקראת שמות", url: "/dashboard/roll-call", icon: ClipboardList });
-    adminItems.push({ title: "משימות", url: "/dashboard/teacher-assignments", icon: FileText });
-  }
-  if (roles.includes("parent")) {
-    adminItems.push({ title: "סקירה כללית", url: "/dashboard/my-child", icon: Users });
-    adminItems.push({ title: "שיחות", url: "/dashboard/chat", icon: MessageCircle });
-  }
-  if (isManagement && !isAdmin) {
+  if (isManagement || isAdmin) {
     adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: Crown });
     adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });
-    adminItems.push({ title: "עץ ארגוני", url: "/dashboard/org-tree", icon: Building2 });
-  }
-  if (isAdmin) {
-    adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: Crown });
-    adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });
-    adminItems.push({ title: "עץ ארגוני מערכת", url: "/dashboard/system-org-tree", icon: Building2 });
-  }
-  if (isAdmin) {
-    adminItems.push({ title: "ניהול מערכת", url: "/dashboard/admin", icon: Shield });
   }
   adminItems.push({ title: "שיחות", url: "/dashboard/chat", icon: MessageCircle });
   adminItems.push({ title: "לוח זמנים", url: "/dashboard/schedule", icon: Calendar });
 
-  const mainItems = isStudent ? studentItems : isGradeCoordinator ? gradeCoordinatorItems : (isTeacher && !isManagement && !isAdmin) ? teacherItems : adminItems;
+  // SELECT ITEMS BASED ON ROLE PRIORITY
+  const getItems = () => {
+    if (roles.includes("parent")) return parentItems;
+    if (isStudent) return studentItems;
+    if (isGradeCoordinator) return gradeCoordinatorItems;
+    if (isTeacher) return teacherItems;
+    return adminItems;
+  };
+
+  const mainItems = getItems();
 
   return (
     <Sidebar side="right" collapsible="icon" className="border-r-0 border-l border-border/50">
@@ -200,11 +190,6 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
                       {ROLE_LABELS[r] || r}
                     </span>
                   ))}
-                  {roles.length > 2 && (
-                    <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
-                      +{roles.length - 2}
-                    </span>
-                  )}
                 </div>
               </div>
             )}
@@ -221,22 +206,17 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
-                      end={item.url === "/dashboard" || item.url === "/dashboard/student-home" || item.url === "/dashboard/teacher-home" || item.url === "/dashboard/grade-coordinator-home"}
+                      end={true}
                       className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors hover:bg-muted/50"
-                      activeClassName="bg-primary/10 text-primary font-medium"
+                      activeClassName="bg-primary/10 text-primary font-medium shadow-sm border-r-2 border-primary"
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
                       {!collapsed && (
                         <span className="font-body text-sm">{item.title}</span>
                       )}
-                      {!collapsed && item.url === "/dashboard/approvals" && profile.pendingApprovalsCount > 0 && (
+                      {!collapsed && item.url === "/dashboard/chat" && (profile as any).unreadChatCount > 0 && (
                         <Badge variant="destructive" className="mr-auto text-[10px] px-1.5 py-0 h-5">
-                          {profile.pendingApprovalsCount}
-                        </Badge>
-                      )}
-                      {!collapsed && item.url === "/dashboard/chat" && profile.unreadChatCount > 0 && (
-                        <Badge variant="destructive" className="mr-auto text-[10px] px-1.5 py-0 h-5">
-                          {profile.unreadChatCount}
+                          {(profile as any).unreadChatCount}
                         </Badge>
                       )}
                     </NavLink>

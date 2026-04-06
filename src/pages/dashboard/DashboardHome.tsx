@@ -87,6 +87,11 @@ const DashboardHome = () => {
     return <Navigate to="/dashboard/grade-coordinator-home" replace />;
   }
 
+  // Redirect parents to their dedicated 'WOW' dashboard
+  if (profile.roles.includes("parent") && !isStaff) {
+    return <Navigate to="/dashboard/my-child" replace />;
+  }
+
   const container = {
     hidden: {},
     show: { transition: { staggerChildren: 0.1 } },

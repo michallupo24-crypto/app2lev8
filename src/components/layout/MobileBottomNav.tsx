@@ -43,6 +43,20 @@ function getNavItems(profile: UserProfile): { primary: NavItem[]; overflow: NavI
   const isAdmin = roles.includes("system_admin");
   const isManagement = roles.includes("management");
 
+  if (roles.includes("parent")) {
+    return {
+      primary: [
+        { title: "בית", url: "/dashboard/my-child", icon: LayoutDashboard },
+        { title: "דוחות", url: "/dashboard/parent-grades", icon: BarChart3 },
+        { title: "מערכת", url: "/dashboard/schedule", icon: Calendar },
+        { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
+      ],
+      overflow: [
+        { title: "מגן זכויות", url: "/dashboard/rights", icon: Shield },
+      ],
+    };
+  }
+
   if (isStudent) {
     return {
       primary: [
