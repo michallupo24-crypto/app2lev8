@@ -38,6 +38,8 @@ interface SubjectStat {
   count: number;
   classAvg: number | null;
   trend: "up" | "down" | "stable";
+  status: "excellent" | "good" | "stable" | "warning" | "critical";
+  statusLabel: string;
 }
 
 interface AttendanceStat {
@@ -56,6 +58,8 @@ interface GradeEntry {
   maxGrade: number;
   gradedAt: string;
   classAvg: number | null;
+  teacherTip?: string | null;
+  relativeStrength: "top" | "above" | "middle" | "struggling" | "context_high";
 }
 
 interface UpcomingEvent {
@@ -211,14 +215,34 @@ const ParentDashboardPage = () => {
         }
       }
 
-      const recent: GradeEntry[] = (subs || []).slice(0, 10).map((s: any) => ({
-        title: s.assignments?.title || "",
-        subject: s.assignments?.subject || "",
-        grade: s.grade,
-        maxGrade: s.assignments?.max_grade || 100,
-        gradedAt: s.graded_at,
-        classAvg: classAvgMap.get(s.assignments?.id) ?? null,
-      }));
+      const recent: GradeEntry[] = (subs || []).slice(0, 10).map((s: any) => {
+        const norm = Math.round((s.grade / (s.assignments?.max_grade || 100)) * 100);
+        const classAvg = classAvgMap.get(s.assignments?.id) ?? null;
+        
+        let relativeStrength: GradeEntry["relativeStrength"] = "middle";
+        if (classAvg !== null) {
+          const diff = norm - classAvg;
+          if (diff > 15) relativeStrength = "top";
+          else if (diff > 5) relativeStrength = "above";
+          else if (diff < -15) relativeStrength = "struggling";
+        }
+        
+        // Contextual logic: if grade is 70 but class average is 40, it's a high achievement
+        if (classAvg !== null && classAvg < 50 && norm > classAvg + 10) {
+            relativeStrength = "context_high";
+        }
+
+        return {
+          title: s.assignments?.title || "",
+          subject: s.assignments?.subject || "",
+          grade: s.grade,
+          maxGrade: s.assignments?.max_grade || 100,
+          gradedAt: s.graded_at,
+          classAvg,
+          teacherTip: s.feedback, // Using feedback field for tips
+          relativeStrength,
+        };
+      });
       setRecentGrades(recent);
 
       // Subject stats
@@ -243,7 +267,16 @@ const ParentDashboardPage = () => {
           const diff = sorted[sorted.length - 1].grade - sorted[sorted.length - 2].grade;
           if (diff > 3) trend = "up"; else if (diff < -3) trend = "down";
         }
-        stats.push({ subject: subj, avg, count: grades.length, classAvg: null, trend });
+        
+        let status: SubjectStat["status"] = "stable";
+        let statusLabel = "יציב";
+        
+        if (avg >= 90) { status = "excellent"; statusLabel = "מצטיין/ת"; }
+        else if (avg >= 80) { status = "good"; statusLabel = "טוב מאוד"; }
+        else if (avg < 60) { status = "critical"; statusLabel = "דרוש שיפור"; }
+        else if (trend === "down") { status = "warning"; statusLabel = "במגמת ירידה"; }
+
+        stats.push({ subject: subj, avg, count: grades.length, classAvg: null, trend, status, statusLabel });
       });
 
       // MoE Grading Rules Integration
@@ -557,30 +590,69 @@ const ParentDashboardPage = () => {
                 {/* AI Snapshot */}
                 {subjectStats.length > 0 && (
                   <motion.div variants={item}>
-                    <Card className="border-purple-500/30 bg-purple-50/50 dark:bg-purple-900/10">
+                {subjectStats.length > 0 && (
+                  <motion.div variants={item}>
+                    <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 overflow-hidden relative">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 blur-2xl" />
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-heading flex items-center gap-2 text-purple-700 dark:text-purple-300">
-                          <Brain className="h-4 w-4" />תמצית AI
+                        <CardTitle className="text-base font-heading flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+                          <Brain className="h-5 w-5" />תמונת מצב אסטרטגית (AI Insights)
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="pt-0 text-sm font-body text-muted-foreground space-y-1">
-                        {subjectStats[0] && (
-                          <p>💪 <b className="font-heading">{subjectStats[0].subject}</b> — המקצוע החזק ביותר עם ממוצע {subjectStats[0].avg}</p>
-                        )}
-                        {subjectStats[subjectStats.length - 1] && subjectStats.length > 1 && subjectStats[subjectStats.length - 1].avg < 70 && (
-                          <p>📈 <b className="font-heading">{subjectStats[subjectStats.length - 1].subject}</b> — ממוצע {subjectStats[subjectStats.length - 1].avg}, מומלץ לשים לב</p>
-                        )}
-                        {subjectStats.filter(s => s.trend === "up").length > 0 && (
-                          <p>✨ מגמת שיפור ב: {subjectStats.filter(s => s.trend === "up").map(s => s.subject).join(", ")}</p>
-                        )}
-                        {attendance?.redLine && (
-                          <p className="text-destructive">⚠️ אחוז החיסורים ({attendance.absencePct}%) מתקרב לגבול שעלול לפגוע בציון</p>
-                        )}
-                        {pendingTasks > 0 && (
-                          <p>⏰ {pendingTasks} מטלות עדיין לא הוגשו</p>
-                        )}
+                      <CardContent className="pt-0 space-y-4">
+                        <div className="relative z-10 bg-white/40 dark:bg-black/20 backdrop-blur-sm rounded-xl p-4 border border-white/50 dark:border-white/5">
+                          <div className="flex gap-4 items-start">
+                             <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center shrink-0">
+                                <TrendingUp className="h-6 w-6 text-indigo-600" />
+                             </div>
+                             <div className="space-y-2">
+                                <p className="font-heading font-bold text-indigo-900 dark:text-indigo-100">
+                                  {overallAvg && overallAvg >= 85 ? "מגמה חיובית חזקה" : "סטטוס למידה יציב"}
+                                </p>
+                                <div className="space-y-3 text-sm font-body text-slate-600 dark:text-slate-300">
+                                  {subjectStats[0] && (
+                                    <div className="flex items-start gap-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 flex-none" />
+                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">נקודת חוזקה:</b> {selectedChild.fullName} מפגין/ה יכולות מצוינות ב<span className="text-green-600 font-bold">{subjectStats[0].subject}</span> (ממוצע {subjectStats[0].avg}).</p>
+                                    </div>
+                                  )}
+                                  
+                                  {attendance?.absencePct && attendance.absencePct > 10 ? (
+                                    <div className="flex items-start gap-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-destructive mt-1.5 flex-none" />
+                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">שימו לב:</b> נרשמו {attendance.absent} חיסורים. קיימת קורלציה בין ימי היעדרות לירידה קלה בציונים במקצועות הליבה.</p>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-start gap-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-none" />
+                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">נוכחות:</b> התמדה מצוינת בשיעורים, דבר התורם ליציבות הלימודית.</p>
+                                    </div>
+                                  )}
+
+                                  {pendingTasks > 0 && (
+                                    <div className="flex items-start gap-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 flex-none" />
+                                      <p><b className="font-heading text-slate-800 dark:text-slate-100">יעד קרוב:</b> ישנן {pendingTasks} מטלות שטרם הוגשו. הגשתן תסייע בשיפור הממוצע הכללי.</p>
+                                    </div>
+                                  )}
+                                </div>
+                             </div>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button variant="secondary" size="sm" className="h-8 text-[11px] font-heading bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                            onClick={() => { setMessageDialog(true); setMessageText(`היי, רציתי להתייעץ לגבי המגמה ב${subjectStats[subjectStats.length-1]?.subject || 'לימודים'}...`); }}>
+                            התייעצות עם המחנך/ת
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-8 text-[11px] font-heading text-slate-500">
+                             מה דרוש לשיפור?
+                          </Button>
+                        </div>
                       </CardContent>
                     </Card>
+                  </motion.div>
+                )}
                   </motion.div>
                 )}
 
@@ -595,21 +667,34 @@ const ParentDashboardPage = () => {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         {subjectStats.map(ss => (
-                          <div key={ss.subject} className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-muted/40 transition-colors">
+                          <div key={ss.subject} className="flex items-center justify-between py-2 px-3 rounded-xl border border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-all">
                             <div className="flex items-center gap-3">
-                              {ss.trend === "up" && <TrendingUp className="h-4 w-4 text-green-500 shrink-0" />}
-                              {ss.trend === "down" && <TrendingDown className="h-4 w-4 text-destructive shrink-0" />}
-                              {ss.trend === "stable" && <Minus className="h-4 w-4 text-muted-foreground shrink-0" />}
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                                ss.status === "excellent" ? "bg-green-100 text-green-700" :
+                                ss.status === "warning" || ss.status === "critical" ? "bg-red-100 text-red-700" : "bg-indigo-100 text-indigo-700"
+                              }`}>
+                                {ss.trend === "up" && <TrendingUp className="h-5 w-5" />}
+                                {ss.trend === "down" && <TrendingDown className="h-5 w-5" />}
+                                {ss.trend === "stable" && <BarChart3 className="h-5 w-5" />}
+                              </div>
                               <div>
-                                <p className="font-heading text-sm font-medium">{ss.subject}</p>
-                                <p className="text-[10px] text-muted-foreground">{ss.count} ציונים</p>
+                                <p className="font-heading text-sm font-bold">{ss.subject}</p>
+                                <Badge variant="secondary" className={`text-[9px] h-4 py-0 ${
+                                  ss.status === "excellent" ? "bg-green-500/10 text-green-700 border-green-200" :
+                                  ss.status === "warning" ? "bg-red-500/10 text-red-700 border-red-200" : ""
+                                }`}>
+                                  {ss.statusLabel}
+                                </Badge>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <div className="w-24 hidden sm:block">
-                                <Progress value={ss.avg} className="h-1.5" />
+                            <div className="flex items-center gap-4">
+                              <div className="hidden sm:block text-right">
+                                <p className="text-[10px] text-muted-foreground">{ss.count} ציונים</p>
+                                <div className="w-16 h-1 mt-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                                   <div className={`h-full ${gradeColor(ss.avg)}`} style={{ width: `${ss.avg}%`, backgroundColor: 'currentColor' }} />
+                                </div>
                               </div>
-                              <span className={`font-heading font-bold text-lg ${gradeColor(ss.avg)}`}>{ss.avg}</span>
+                              <span className={`font-heading font-black text-xl ${gradeColor(ss.avg)}`}>{ss.avg}</span>
                             </div>
                           </div>
                         ))}
@@ -654,34 +739,63 @@ const ParentDashboardPage = () => {
                       </Card>
                     )}
 
-                    {/* Grades list */}
-                    <div className="space-y-2">
+                    {/* Grades list with Contextual Intelligence */}
+                    <div className="space-y-3">
                       {recentGrades.map((g, i) => {
                         const norm = Math.round((g.grade / g.maxGrade) * 100);
-                        const vs = g.classAvg !== null ? norm - g.classAvg : null;
                         return (
-                          <Card key={i} className="hover:shadow-sm transition-all">
-                            <CardContent className="py-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-heading font-medium text-sm truncate">{g.title}</p>
-                                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                                    <span>{g.subject}</span>
-                                    {g.gradedAt && <><span>•</span><span>{new Date(g.gradedAt).toLocaleDateString("he-IL")}</span></>}
-                                  </div>
-                                </div>
-                                <div className="text-left shrink-0">
-                                  <span className={`font-heading font-bold text-xl ${gradeColor(norm)}`}>{g.grade}</span>
-                                  {g.maxGrade !== 100 && <span className="text-xs text-muted-foreground">/{g.maxGrade}</span>}
-                                  {vs !== null && (
-                                    <p className={`text-[10px] ${vs > 0 ? "text-green-500" : vs < 0 ? "text-destructive" : "text-muted-foreground"}`}>
-                                      {vs > 0 ? `+${vs}` : vs} מממוצע
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
+                          <div key={i} className="space-y-2">
+                             <Card className={`overflow-hidden border-r-4 ${
+                               g.relativeStrength === "top" || g.relativeStrength === "context_high" ? "border-r-green-500" : 
+                               g.relativeStrength === "struggling" ? "border-r-destructive" : "border-r-slate-200"
+                             }`}>
+                               <CardContent className="py-4">
+                                 <div className="flex items-start justify-between gap-4">
+                                   <div className="flex-1 min-w-0">
+                                     <div className="flex items-center gap-2 mb-1">
+                                       <p className="font-heading font-bold text-sm truncate">{g.title}</p>
+                                       {g.relativeStrength === "context_high" && (
+                                         <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">✨ הישג משמעותי יחסית לכיתה</Badge>
+                                       )}
+                                     </div>
+                                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                       <span className="font-medium text-slate-700 dark:text-slate-300">{g.subject}</span>
+                                       <span>•</span>
+                                       <span>{new Date(g.gradedAt).toLocaleDateString("he-IL")}</span>
+                                     </div>
+                                     
+                                     {/* Smart Analysis Text */}
+                                     <p className="text-[11px] mt-2 font-body italic text-slate-500">
+                                       {g.relativeStrength === "top" ? "הציון נמצא ברמה הגבוהה ביותר של הכיתה." :
+                                        g.relativeStrength === "above" ? "ביצועים טובים, מעל הממוצע הכיתתי בשיעור זה." :
+                                        g.relativeStrength === "context_high" ? `מרשים! למרות שהציון הוא ${g.grade}, המשימה הייתה מאתגרת לכולם והציון גבוה משמעותית מהממוצע (${g.classAvg}).` :
+                                        g.relativeStrength === "struggling" ? "ניכר קושי מסוים במשימה זו יחסית לכיתה, מומלץ לחזור על החומר." : 
+                                        "ציון יציב התואם את רמת הכיתה."}
+                                     </p>
+                                   </div>
+                                   <div className="text-left shrink-0">
+                                      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-2 min-w-[60px] text-center border border-slate-200 dark:border-slate-700">
+                                        <p className={`text-2xl font-heading font-black ${gradeColor(norm)}`}>{g.grade}</p>
+                                        <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">ציון סופי</p>
+                                      </div>
+                                   </div>
+                                 </div>
+                               </CardContent>
+                             </Card>
+                             
+                             {/* Teacher's Personal Tip (if exists) */}
+                             {g.teacherTip && (
+                               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+                                 className="mx-4 p-3 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-xl rounded-tr-none border border-indigo-100 dark:border-indigo-800 relative">
+                                 <div className="absolute top-0 right-0 -mr-2 -mt-2 bg-indigo-600 text-white rounded-full p-1 shadow-sm">
+                                    <MessageSquare className="h-3 w-3" />
+                                 </div>
+                                 <p className="text-xs text-indigo-900 dark:text-indigo-200 font-body leading-relaxed">
+                                   <b className="font-heading">מסר מהמחנך/ת:</b> "{g.teacherTip}"
+                                 </p>
+                               </motion.div>
+                             )}
+                          </div>
                         );
                       })}
                     </div>

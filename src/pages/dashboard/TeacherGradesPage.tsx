@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BarChart3, Users, TrendingUp, TrendingDown, AlertTriangle, Award,
-  Loader2, FileText, Save, CheckCircle2, BookOpen, Zap, Trophy,
+  Loader2, FileText, Save, CheckCircle2, BookOpen, Zap, Trophy, MessageSquare,
 } from "lucide-react";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -332,6 +332,21 @@ const TeacherGradesPage = () => {
                   </div>
                 )}
 
+                {/* Contextual Teacher Alert */}
+                {stats && stats.avg < 60 && (
+                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+                    <Card className="bg-orange-50 border-orange-200 dark:bg-orange-900/10 dark:border-orange-800">
+                      <CardContent className="py-3 flex items-center gap-3">
+                        <AlertTriangle className="h-5 w-5 text-orange-600" />
+                        <div className="flex-1">
+                          <p className="text-sm font-heading font-bold text-orange-800 dark:text-orange-200">שים לב: ממוצע המשימה נמוך יחסית ({stats.avg})</p>
+                          <p className="text-xs text-orange-700 dark:text-orange-300 font-body">מומלץ להוסיף מסר מרגיע להורים שהמשימה הייתה מאתגרת במיוחד לכל הכיתה.</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                )}
+
                 {/* Distribution */}
                 {stats && stats.graded > 0 && (
                   <Card>
@@ -522,21 +537,47 @@ const TeacherGradesPage = () => {
               const maxG = assignment?.maxGrade || 100;
 
               return (
-                <div key={sg.studentId} className="py-2 border-b border-border/50 last:border-0 space-y-1">
+                <div key={sg.studentId} className="py-3 border-b border-border/50 last:border-0 space-y-2">
                   <div className="flex items-center gap-3">
-                    <span className="font-heading text-sm flex-1 min-w-0 truncate">{sg.studentName}</span>
+                    <span className="font-heading text-sm font-bold flex-1 min-w-0 truncate">{sg.studentName}</span>
                     {sg.hasAppeal && <Badge variant="outline" className="text-[10px] text-orange-500 shrink-0">⚠ ערעור</Badge>}
-                    <Input type="number" placeholder="ציון" className="w-20 text-center" dir="ltr"
-                      min={0} max={maxG} value={currentGrade}
-                      onChange={(e) => handleGradeChange(sg.studentId, "grade", e.target.value)} />
+                    <div className="relative w-20">
+                      <Input type="number" placeholder="ציון" className="text-center font-bold" dir="ltr"
+                        min={0} max={maxG} value={currentGrade}
+                        onChange={(e) => handleGradeChange(sg.studentId, "grade", e.target.value)} />
+                    </div>
                     {!isNaN(gradeNum) && gradeNum > 0 && (
-                      <span className={`text-xs font-heading font-bold ${gradeNum >= 90 ? "text-green-500" : gradeNum >= 60 ? "text-yellow-500" : "text-destructive"}`}>
-                        {Math.round((gradeNum / maxG) * 100)}%
-                      </span>
+                      <div className="w-10 text-center">
+                        <span className={`text-xs font-heading font-bold ${gradeNum >= 90 ? "text-green-500" : gradeNum >= 60 ? "text-yellow-500" : "text-destructive"}`}>
+                          {Math.round((gradeNum / maxG) * 100)}%
+                        </span>
+                      </div>
                     )}
                   </div>
-                  <Input placeholder="משוב קצר..." className="text-xs" value={currentFeedback}
-                    onChange={(e) => handleGradeChange(sg.studentId, "feedback", e.target.value)} />
+                  
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-3 w-3 text-indigo-500" />
+                      <span className="text-[10px] font-heading font-medium text-indigo-600 uppercase">מסר פדגוגי להורה (טיפ אישי)</span>
+                    </div>
+                    <Input placeholder="כתוב משהו להורה... (למשל: 'הפגין השקעה רבה למרות הקושי')" className="text-xs bg-indigo-50/20" value={currentFeedback}
+                      onChange={(e) => handleGradeChange(sg.studentId, "feedback", e.target.value)} />
+                    
+                    {/* Quick Pedagogical Suggestions */}
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { label: "השקעה ניכרת", val: "ניכרת השקעה רבה מאוד במשימה זו." },
+                        { label: "התקדמות יפה", val: "ניכרת התקדמות יפה מאוד בתקופה האחרונה." },
+                        { label: "משימה מאתגרת", val: "המשימה הייתה מאתגרת לכולם, הציון משקף התמודדות יפה." }
+                      ].map(suggest => (
+                        <button key={suggest.label} type="button" 
+                          onClick={() => handleGradeChange(sg.studentId, "feedback", suggest.val)}
+                          className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 hover:bg-indigo-100 text-slate-500 transition-colors">
+                          + {suggest.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               );
             })}
