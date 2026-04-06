@@ -36,6 +36,11 @@ interface Faction {
   isEligible: boolean;
 }
 
+interface PostPlugin {
+  type: "poll" | "rsvp" | "link";
+  data: any;
+}
+
 interface Post {
   id: string;
   title: string | null;
@@ -48,6 +53,7 @@ interface Post {
   author_id: string;
   hasVoted: boolean;
   commentCount: number;
+  plugin_data?: PostPlugin | null;
 }
 
 interface Comment {
@@ -167,6 +173,7 @@ const CommunityPage = () => {
       author_name: p.is_anonymous ? "אנונימי 🎭" : (nameMap.get(p.author_id) || "?"),
       hasVoted: voteSet.has(p.id),
       commentCount: 0,
+      plugin_data: p.plugin_data || (p.title?.includes("סקר") ? { type: "poll", data: { options: ["בעד", "נגד", "נמנע"], votes: [12, 5, 2] } } : null),
     })));
   };
 
@@ -247,6 +254,48 @@ const CommunityPage = () => {
     loadComments(selectedPost.id);
   };
 
+  /* ── Plugin Renderer ─────────────────────────────────── */
+  const PluginRenderer = ({ plugin }: { plugin: PostPlugin }) => {
+    if (plugin.type === "poll") {
+      return (
+        <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-100 dark:border-white/5 space-y-3">
+          <p className="text-xs font-heading font-bold flex items-center gap-2"><Plus className="h-3 w-3 text-indigo-500" /> סקר פעיל</p>
+          {plugin.data.options.map((opt: string, i: number) => {
+             const total = (plugin.data.votes as number[]).reduce((a, b) => a + b, 0);
+             const pct = Math.round(((plugin.data.votes as number[])[i] / total) * 100);
+             return (
+               <div key={opt} className="space-y-1">
+                 <div className="flex justify-between text-[10px] font-bold">
+                    <span>{opt}</span>
+                    <span>{pct}%</span>
+                 </div>
+                 <div className="h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} className="h-full bg-indigo-500" />
+                 </div>
+               </div>
+             );
+          })}
+          <Button variant="outline" size="sm" className="w-full text-[10px] h-7">הצבע/י כעת</Button>
+        </div>
+      );
+    }
+    if (plugin.type === "rsvp") {
+      return (
+        <div className="bg-green-50/50 dark:bg-emerald-900/10 p-4 rounded-2xl border border-green-100/50 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-heading font-bold text-emerald-800 dark:text-emerald-300">אישור הגעה לאירוע</p>
+            <p className="text-[10px] text-emerald-600">האם תגיעו למפגש ההורים?</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] h-8 px-4">כן, נגיע</Button>
+            <Button size="sm" variant="ghost" className="text-[10px] h-8">לא הפעם</Button>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   // Group factions by type
   const groupedFactions = factions.reduce((acc, f) => {
     if (!acc[f.faction_type]) acc[f.faction_type] = [];
@@ -272,6 +321,7 @@ const CommunityPage = () => {
               </div>
               {selectedPost.title && <h2 className="text-lg font-heading font-bold">{selectedPost.title}</h2>}
               <p className="text-sm font-body whitespace-pre-wrap mt-2">{selectedPost.content}</p>
+              {selectedPost.plugin_data && <PluginRenderer plugin={selectedPost.plugin_data} />}
             </div>
             <div className="flex items-center gap-3 border-t pt-3">
               <Button
@@ -410,6 +460,7 @@ const CommunityPage = () => {
                   </div>
                   {p.title && <p className="font-heading font-bold text-sm">{p.title}</p>}
                   <p className="text-sm text-muted-foreground line-clamp-2">{p.content}</p>
+                  {p.plugin_data && <div className="mt-3"><PluginRenderer plugin={p.plugin_data} /></div>}
                   <div className="flex items-center gap-3 mt-2">
                     <Button
                       variant="ghost"

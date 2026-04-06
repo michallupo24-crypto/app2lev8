@@ -30,7 +30,9 @@ type ConversationType =
   | "class_subject"
   | "class_homeroom"
   | "counseling"
-  | "parent_teacher";
+  | "parent_teacher"
+  | "class_parent_group"
+  | "grade_parent_group";
 
 interface Conversation {
   id: string;
@@ -91,6 +93,7 @@ const PRESENCE_LABELS: Record<string, string> = {
 };
 
 const CHANNEL_SECTIONS: { types: ConversationType[]; title: string }[] = [
+  { types: ["class_parent_group", "grade_parent_group"], title: "קהילת הורים" },
   { types: ["counseling"], title: "מרחב ייעוץ" },
   { types: ["parent_teacher"], title: "הורה–מורה" },
   { types: ["class_subject"], title: "מקצועות" },
@@ -763,6 +766,8 @@ const ChatPage = () => {
     if (type === "class_homeroom") return <School className="h-4 w-4" />;
     if (type === "counseling") return <HeartHandshake className="h-4 w-4" />;
     if (type === "parent_teacher") return <UserRound className="h-4 w-4" />;
+    if (type === "class_parent_group") return <Users className="h-4 w-4" />;
+    if (type === "grade_parent_group") return <School className="h-4 w-4" />;
     return <MessageCircle className="h-4 w-4" />;
   };
 
@@ -772,6 +777,8 @@ const ChatPage = () => {
     if (type === "class_homeroom") return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
     if (type === "counseling") return "bg-rose-500/15 text-rose-700 dark:text-rose-400";
     if (type === "parent_teacher") return "bg-amber-500/15 text-amber-800 dark:text-amber-400";
+    if (type === "class_parent_group") return "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400";
+    if (type === "grade_parent_group") return "bg-blue-700/15 text-blue-800 dark:text-blue-300";
     return "bg-muted text-muted-foreground";
   };
 
