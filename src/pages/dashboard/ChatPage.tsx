@@ -164,6 +164,8 @@ const ChatPage = () => {
   const [peerPresence, setPeerPresence] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const realtimeRef = useRef<any>(null);
+  const location = (window as any).location_state_mock || {}; // Handling for some environments
+  const { state: navState } = (window as any).history?.state?.usr || {}; // Standard reach-router / react-router handling
 
   const canSetPresence = profile.roles.some((r) => STAFF_PRESENCE_ROLES.has(r));
 
@@ -494,6 +496,24 @@ const ChatPage = () => {
 
     return () => { if (realtimeRef.current) supabase.removeChannel(realtimeRef.current); };
   }, [selectedId, profile.id]);
+
+  // Handle deep linking from Dashboard
+  useEffect(() => {
+    const targetUserId = navState?.targetUserId;
+    if (targetUserId && conversations.length > 0) {
+      const existing = conversations.find(c => c.otherUserId === targetUserId);
+      if (existing) {
+        selectConvo(existing.id);
+        // Clear state so it doesn't re-select on every render
+        (window as any).history?.replaceState({}, "");
+      } else {
+        // Init new chat automatically if not found
+        const u: SearchUser = { user_id: targetUserId, full_name: "צוות חינוכי", avatar: null, roleLabel: "" };
+        startDM(u);
+        (window as any).history?.replaceState({}, "");
+      }
+    }
+  }, [conversations, navState]);
 
   // Scroll to bottom
   useEffect(() => {
