@@ -24,22 +24,20 @@ import type { UserProfile } from "@/hooks/useAuth";
 import type { AvatarConfig } from "@/components/avatar/AvatarStudio";
 
 /* ─── Types ───────────────────────────────────────────── */
-type ConversationType =
-  | "private"
-  | "group"
-  | "class_subject"
-  | "class_homeroom"
-  | "counseling"
-  | "parent_teacher"
-  | "class_parent_group"
-  | "grade_parent_group";
+type ConversationType = 
+  | "direct" | "class" | "grade" | "subject" | "announcement" | "parent_teacher" | "counseling" | "parent_class" | "parent_grade"
+  | "private" | "group" | "class_subject" | "class_homeroom" | "class_parent_group" | "grade_parent_group";
 
 interface Conversation {
   id: string;
   title: string | null;
   type: ConversationType;
-  subject: string | null;
-  grade: string | null;
+  class_id?: string | null;
+  school_id?: string | null;
+  subject?: string | null;
+  grade?: string | null;
+  classId?: string | null; // Support both naming styles found in DB vs Code
+  schoolId?: string | null;
   is_accepted: boolean;
   created_by: string;
   updated_at: string;
@@ -48,10 +46,8 @@ interface Conversation {
   otherName: string;
   otherAvatar: AvatarConfig | null;
   otherRoleLabel: string;
-  /** בצ'אט פרטי — מזהה הצד השני (למציאת שיחה קיימת ולנראות) */
   otherUserId: string | null;
   participantCount: number;
-  /** שמות לתצוגה בכותרת קבוצה (סגנון וואטסאפ) */
   participantPreview: string;
 }
 
@@ -499,17 +495,25 @@ const ChatPage = () => {
 
   // Handle deep linking from Dashboard
   useEffect(() => {
-    const targetUserId = navState?.targetUserId;
-    if (targetUserId && conversations.length > 0) {
+    if (conversations.length === 0 || !navState) return;
+
+    const { targetUserId, initialType } = navState;
+
+    if (targetUserId) {
       const existing = conversations.find(c => c.otherUserId === targetUserId);
       if (existing) {
         selectConvo(existing.id);
-        // Clear state so it doesn't re-select on every render
         (window as any).history?.replaceState({}, "");
       } else {
-        // Init new chat automatically if not found
         const u: SearchUser = { user_id: targetUserId, full_name: "צוות חינוכי", avatar: null, roleLabel: "" };
         startDM(u);
+        (window as any).history?.replaceState({}, "");
+      }
+    } else if (initialType) {
+      const groupToken = initialType === 'parent_class' ? 'הורי כיתה' : 'הורי שכבה';
+      const existingGroup = conversations.find(c => c.title?.includes(groupToken) || c.type === initialType);
+      if (existingGroup) {
+        selectConvo(existingGroup.id);
         (window as any).history?.replaceState({}, "");
       }
     }
