@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useLocation } from "react-router-dom";
 import {
   MessageCircle, Send, Search, Users, ArrowRight, Moon,
   AlertTriangle, BookOpen, UserPlus, Lock, Check, X, Plus,
@@ -146,6 +146,8 @@ async function fetchAvatarsByUserIds(userIds: string[]) {
 const ChatPage = () => {
   const { profile } = useOutletContext<{ profile: UserProfile }>();
   const { toast } = useToast();
+  const location = useLocation();
+  const navState = location.state as { targetUserId?: string; initialType?: ConversationType } | null;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -164,8 +166,6 @@ const ChatPage = () => {
   const [peerPresence, setPeerPresence] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const realtimeRef = useRef<any>(null);
-  const location = (window as any).location_state_mock || {}; // Handling for some environments
-  const { state: navState } = (window as any).history?.state?.usr || {}; // Standard reach-router / react-router handling
 
   const canSetPresence = profile.roles.some((r) => STAFF_PRESENCE_ROLES.has(r));
 
