@@ -31,18 +31,9 @@ const LoginPage = () => {
         .eq("id", data.user.id)
         .single();
 
-      if (!profile?.is_approved) {
-        await supabase.auth.signOut();
-        toast({
-          title: "החשבון ממתין לאישור",
-          description: "החשבון שלך עדיין לא אושר. אנא המתן לאישור מהגורם המוסמך.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Check roles and redirect
+      // Proceed to login even if not yet approved
+      // The dashboard (DashboardHome) will handle the approval message display
+      
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
