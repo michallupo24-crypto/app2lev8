@@ -95,20 +95,23 @@ const StudentGradesPage = () => {
         if (classData) (classData as any[]).forEach(row => avgMap.set(row.assignment_id, row.avg_grade));
       }
 
-      const enriched: GradeEntry[] = subs.map((s: any) => ({
-        id: s.id,
-        assignmentId: s.assignment_id,
-        title: s.assignments?.title || "ללא כותרת",
-        subject: s.assignments?.subject || "כללי",
-        type: s.assignments?.type || "homework",
-        grade: s.grade,
-        maxGrade: s.assignments?.max_grade || 100,
-        weight: s.assignments?.weight_percent || 0,
-        gradedAt: s.graded_at,
-        feedback: s.feedback,
-        classAvg: avgMap.has(s.assignment_id) ? Math.round(avgMap.get(s.assignment_id)!) : null,
-        normalizedGrade: Math.round((s.grade / (s.assignments?.max_grade || 100)) * 100),
-      }));
+      const enriched: GradeEntry[] = subs.map((s: any) => {
+        const assignment = Array.isArray(s.assignments) ? s.assignments[0] : s.assignments;
+        return {
+          id: s.id,
+          assignmentId: s.assignment_id,
+          title: assignment?.title || "ללא כותרת",
+          subject: assignment?.subject || "כללי",
+          type: assignment?.type || "homework",
+          grade: s.grade,
+          maxGrade: assignment?.max_grade || 100,
+          weight: assignment?.weight_percent || 0,
+          gradedAt: s.graded_at,
+          feedback: s.feedback,
+          classAvg: avgMap.has(s.assignment_id) ? Math.round(avgMap.get(s.assignment_id)!) : null,
+          normalizedGrade: Math.round((s.grade / (assignment?.max_grade || 100)) * 100),
+        };
+      });
 
       setGrades(enriched);
       setLoading(false);

@@ -100,7 +100,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     { title: "הקראת שמות", url: "/dashboard/roll-call", icon: ClipboardList },
     { title: "משימות", url: "/dashboard/teacher-assignments", icon: FileText },
     { title: "סטודיו משימות", url: "/dashboard/task-studio", icon: Wand2 },
-    { title: "ציונים", url: "/dashboard/teacher-grades", icon: BarChart3 },
+    { title: "דוחות", url: "/dashboard/grades", icon: BarChart3 },
     { title: "לוח זמנים", url: "/dashboard/schedule", icon: Calendar },
     { title: "הכיתות שלי", url: "/dashboard/my-classes", icon: Users },
     { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
@@ -123,7 +123,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
   // Parent Navigation (CLEAN & PREMIUM)
   const parentItems = [
     { title: "דף הבית", url: "/dashboard/my-child", icon: LayoutDashboard },
-    { title: "דוחות וציונים", url: "/dashboard/parent-grades", icon: BarChart3 },
+    { title: "דוחות וציונים", url: "/dashboard/grades", icon: BarChart3 },
     { title: "מערכת שעות", url: "/dashboard/schedule", icon: Calendar },
     { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
     { title: "מגן זכויות", url: "/dashboard/rights", icon: Shield },

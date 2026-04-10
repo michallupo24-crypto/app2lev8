@@ -47,7 +47,7 @@ function getNavItems(profile: UserProfile): { primary: NavItem[]; overflow: NavI
     return {
       primary: [
         { title: "בית", url: "/dashboard/my-child", icon: LayoutDashboard },
-        { title: "דוחות", url: "/dashboard/parent-grades", icon: BarChart3 },
+        { title: "דוחות", url: "/dashboard/grades", icon: BarChart3 },
         { title: "מערכת", url: "/dashboard/schedule", icon: Calendar },
         { title: "שיחות", url: "/dashboard/chat", icon: MessageCircle },
       ],
