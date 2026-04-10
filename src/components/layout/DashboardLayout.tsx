@@ -38,7 +38,9 @@ const DashboardLayout = () => {
     );
   }
 
-  if (!profile) return null;
+  if (!profile) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <SidebarProvider>

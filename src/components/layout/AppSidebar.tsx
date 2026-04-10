@@ -215,9 +215,11 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
                         <span className="font-body text-sm">{item.title}</span>
                       )}
                       {!collapsed && item.url === "/dashboard/chat" && (profile as any).unreadChatCount > 0 && (
-                        <Badge variant="destructive" className="mr-auto text-[10px] px-1.5 py-0 h-5">
-                          {(profile as any).unreadChatCount}
-                        </Badge>
+                        <div className="mr-auto">
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
+                            {(profile as any).unreadChatCount}
+                          </Badge>
+                        </div>
                       )}
                     </NavLink>
                   </SidebarMenuButton>

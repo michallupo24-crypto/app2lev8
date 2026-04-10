@@ -162,20 +162,24 @@ export function MobileBottomNav({ profile }: MobileBottomNavProps) {
             <item.icon className="h-6 w-6" />
             <span className="text-[10px] font-heading leading-tight">{item.title}</span>
             {item.url === "/dashboard/approvals" && profile.pendingApprovalsCount > 0 && (
-              <Badge
-                variant="destructive"
-                className="absolute top-1 right-1 text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
-              >
-                {profile.pendingApprovalsCount}
-              </Badge>
+              <div className="absolute top-1 right-1">
+                <Badge
+                  variant="destructive"
+                  className="text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
+                >
+                  {profile.pendingApprovalsCount}
+                </Badge>
+              </div>
             )}
             {item.url === "/dashboard/chat" && profile.unreadChatCount > 0 && (
-              <Badge
-                variant="destructive"
-                className="absolute top-1 right-1 text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
-              >
-                {profile.unreadChatCount}
-              </Badge>
+              <div className="absolute top-1 right-1">
+                <Badge
+                  variant="destructive"
+                  className="text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
+                >
+                  {profile.unreadChatCount}
+                </Badge>
+              </div>
             )}
           </button>
         ))}
@@ -212,12 +216,14 @@ export function MobileBottomNav({ profile }: MobileBottomNavProps) {
                     <item.icon className="h-7 w-7" />
                     <span className="text-xs font-heading">{item.title}</span>
                     {item.url === "/dashboard/approvals" && profile.pendingApprovalsCount > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="absolute top-2 right-2 text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
-                      >
-                        {profile.pendingApprovalsCount}
-                      </Badge>
+                      <div className="absolute top-2 right-2">
+                        <Badge
+                          variant="destructive"
+                          className="text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center"
+                        >
+                          {profile.pendingApprovalsCount}
+                        </Badge>
+                      </div>
                     )}
                   </button>
                 ))}
