@@ -3,10 +3,10 @@ import { useOutletContext, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Users, Heart, ChevronLeft, UserRound,
-  HeartHandshake, MessageSquare, Activity, Percent,
+  Users, Heart, ChevronLeft, User,
+  Handshake, MessageSquare, Activity, Percent,
   FileText, ArrowLeft, Sparkles, GraduationCap, 
-  XCircle, CalendarDays, ShieldCheck
+  X, Calendar, Shield
 } from "lucide-react";
 import type { UserProfile } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -242,7 +242,7 @@ const ParentDashboardPage = () => {
                  <div className="space-y-6">
                     <div className="flex justify-between items-center px-4">
                        <h3 className="text-xl font-black flex items-center gap-3">
-                          <CalendarDays className="h-6 w-6 text-indigo-600" /> לו"ז אירועים ומבצעי למידה
+                          <Calendar className="h-6 w-6 text-indigo-600" /> לו"ז אירועים ומבצעי למידה
                        </h3>
                        <div className="px-4 py-1.5 rounded-xl border border-slate-200 text-[10px] font-black text-slate-500 uppercase">Live_Sync</div>
                     </div>
@@ -280,7 +280,7 @@ const ParentDashboardPage = () => {
                     <h3 className="text-xl font-black mb-10 flex items-center gap-4 relative z-10">ערוצי קשר ישירים</h3>
                     <div className="space-y-5 relative z-10">
                        <button onClick={() => goToChat(state.educators.teacherId)} className="w-full flex items-center gap-5 p-6 rounded-[2rem] bg-white/5 hover:bg-white/10 transition-all border border-white/5 shadow-lg active:scale-95">
-                          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-300 shadow-inner"><UserRound className="h-6 w-6" /></div>
+                          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-300 shadow-inner"><User className="h-6 w-6" /></div>
                           <div className="flex-1 text-right">
                              <p className="text-[9px] text-indigo-400 uppercase font-black tracking-widest mb-1 opacity-80">מחנכת הכיתה</p>
                              <p className="text-md font-black">{state.educators.educatorName || "—"}</p>
@@ -289,7 +289,7 @@ const ParentDashboardPage = () => {
                        </button>
 
                        <button onClick={() => goToChat(state.educators.counselorId)} className="w-full flex items-center gap-5 p-6 rounded-[2rem] bg-white/5 hover:bg-white/10 transition-all border border-white/5 shadow-lg active:scale-95">
-                          <div className="w-14 h-14 rounded-2xl bg-rose-500/10 flex items-center justify-center text-rose-300 shadow-inner"><HeartHandshake className="h-6 w-6" /></div>
+                          <div className="w-14 h-14 rounded-2xl bg-rose-500/10 flex items-center justify-center text-rose-300 shadow-inner"><Handshake className="h-6 w-6" /></div>
                           <div className="flex-1 text-right">
                              <p className="text-[9px] text-rose-400 uppercase font-black tracking-widest mb-1 opacity-80">יועצת השכבה</p>
                              <p className="text-md font-black italic opacity-60">{state.educators.counselorName || "—"}</p>
@@ -322,7 +322,7 @@ const ParentDashboardPage = () => {
                     <div className="absolute top-0 left-0 p-8 opacity-10"><Sparkles className="h-10 w-10 text-indigo-600" /></div>
                     <div className="flex items-center gap-4 mb-6 justify-end">
                        <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Guardian AI_Insights</p>
-                       <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                       <Shield className="h-5 w-5 text-indigo-600" />
                     </div>
                     <p className="text-xs font-bold text-slate-600 leading-relaxed italic border-r-2 border-indigo-300 pr-6">
                        המערכת סונכרנה בהצלחה מול בסיס הנתונים. כל האירועים והקבוצות פעילים.

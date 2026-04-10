@@ -10,7 +10,7 @@ import {
   BarChart3,
   LogOut,
   Shield,
-  Target,
+  Activity,
   Trophy,
   Calendar,
   Brain,
@@ -19,9 +19,9 @@ import {
   FileText,
   MessageCircle,
   Building2,
-  Radio,
-  Wand2,
-  Crown,
+  Lock,
+  Settings,
+  User,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import AvatarPreview from "@/components/avatar/AvatarPreview";
@@ -81,10 +81,10 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
   const studentItems = [
     { title: "דאשבורד", url: "/dashboard/student-home", icon: LayoutDashboard },
     { title: "המקצועות שלי", url: "/dashboard/subjects", icon: BookOpen },
-    { title: "משימות", url: "/dashboard/tasks", icon: Target },
+    { title: "משימות", url: "/dashboard/tasks", icon: Activity },
     { title: "הישגים", url: "/dashboard/badges", icon: Trophy },
     { title: "ציונים", url: "/dashboard/grades", icon: FileText },
-    { title: "שיעור חי", url: "/dashboard/live-student", icon: Radio },
+    { title: "שיעור חי", url: "/dashboard/live-student", icon: Activity },
     { title: "לוח זמנים", url: "/dashboard/schedule", icon: Calendar },
     { title: "נוכחות", url: "/dashboard/attendance", icon: ClipboardList },
     { title: "מגן זכויות", url: "/dashboard/rights", icon: Shield },
@@ -96,10 +96,10 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
   // Teacher navigation
   const teacherItems: { title: string; url: string; icon: any }[] = [
     { title: "דאשבורד", url: "/dashboard/teacher-home", icon: LayoutDashboard },
-    { title: "שיעור חי", url: "/dashboard/live-lesson", icon: Radio },
+    { title: "שיעור חי", url: "/dashboard/live-lesson", icon: Activity },
     { title: "הקראת שמות", url: "/dashboard/roll-call", icon: ClipboardList },
     { title: "משימות", url: "/dashboard/teacher-assignments", icon: FileText },
-    { title: "סטודיו משימות", url: "/dashboard/task-studio", icon: Wand2 },
+    { title: "סטודיו משימות", url: "/dashboard/task-studio", icon: Settings },
     { title: "דוחות", url: "/dashboard/grades", icon: BarChart3 },
     { title: "לוח זמנים", url: "/dashboard/schedule", icon: Calendar },
     { title: "הכיתות שלי", url: "/dashboard/my-classes", icon: Users },
@@ -140,7 +140,7 @@ export function AppSidebar({ profile, onLogout }: AppSidebarProps) {
     adminItems.push({ title: "כיתות", url: "/dashboard/classes", icon: BookOpen });
   }
   if (isManagement || isAdmin) {
-    adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: Crown });
+    adminItems.push({ title: "דאשבורד מנהלת", url: "/dashboard/principal", icon: User });
     adminItems.push({ title: "סטטיסטיקות", url: "/dashboard/stats", icon: BarChart3 });
   }
   adminItems.push({ title: "שיחות", url: "/dashboard/chat", icon: MessageCircle });
