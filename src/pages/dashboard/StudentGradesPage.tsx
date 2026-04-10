@@ -69,25 +69,30 @@ const StudentGradesPage = () => {
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
   const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
 
-  /* ── Data Logic (NO FILLERS) ─────────────────────────── */
+  /* ── Academic Pulse (NO FILLERS) ────────────────────── */
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      if (isParentView) {
-        const { data: p } = await supabase.from("profiles").select("full_name").eq("id", studentId).single();
-        if (p) setStudentName(p.full_name);
+      let targetId = studentId;
+
+      // Parent Context Recovery: If no ID in URL, find first child
+      if (profile.role === 'parent' && !paramId) {
+        const { data: kids } = await supabase.from("parent_student").select("student_id").eq("parent_id", profile.id).limit(1);
+        if (kids?.[0]?.student_id) targetId = kids[0].student_id;
       }
+
+      const { data: p } = await supabase.from("profiles").select("full_name").eq("id", targetId).single();
+      if (p) setStudentName(p.full_name);
 
       const { data: subs, error } = await supabase
         .from("submissions")
         .select("id, grade, graded_at, feedback, assignment_id, assignments(id, title, subject, type, weight_percent, max_grade)")
-        .eq("student_id", studentId)
-        .eq("status", "graded")
+        .eq("student_id", targetId)
+        .not("grade", "is", null)
         .order("graded_at", { ascending: false });
 
       if (error || !subs) { setLoading(false); return; }
 
-      // Fetch assignment averages for class context
       const assignmentIds = subs.map((s: any) => s.assignment_id).filter(Boolean);
       let avgMap = new Map<string, number>();
       if (assignmentIds.length > 0) {
@@ -96,20 +101,20 @@ const StudentGradesPage = () => {
       }
 
       const enriched: GradeEntry[] = subs.map((s: any) => {
-        const assignment = Array.isArray(s.assignments) ? s.assignments[0] : s.assignments;
+        const assign = Array.isArray(s.assignments) ? s.assignments[0] : s.assignments;
         return {
           id: s.id,
           assignmentId: s.assignment_id,
-          title: assignment?.title || "ללא כותרת",
-          subject: assignment?.subject || "כללי",
-          type: assignment?.type || "homework",
+          title: assign?.title || "ללא כותרת",
+          subject: assign?.subject || "כללי",
+          type: assign?.type || "homework",
           grade: s.grade,
-          maxGrade: assignment?.max_grade || 100,
-          weight: assignment?.weight_percent || 0,
+          maxGrade: assign?.max_grade || 100,
+          weight: assign?.weight_percent || 0,
           gradedAt: s.graded_at,
           feedback: s.feedback,
           classAvg: avgMap.has(s.assignment_id) ? Math.round(avgMap.get(s.assignment_id)!) : null,
-          normalizedGrade: Math.round((s.grade / (assignment?.max_grade || 100)) * 100),
+          normalizedGrade: Math.round((s.grade / (assign?.max_grade || 100)) * 100),
         };
       });
 
