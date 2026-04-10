@@ -24,7 +24,7 @@ export const useAuth = () => {
   const loadProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      navigate("/login");
+      setLoading(false);
       return;
     }
 
@@ -35,7 +35,7 @@ export const useAuth = () => {
     ]);
 
     if (!profileRes.data) {
-      navigate("/login");
+      setLoading(false);
       return;
     }
 
