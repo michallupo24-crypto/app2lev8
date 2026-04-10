@@ -72,8 +72,11 @@ const DashboardHome = () => {
     load();
   }, [isStaff]);
 
+  // Safe role checking
+  const currentRoles = profile?.roles || [];
+
   // Redirect students to their dedicated dashboard
-  if (isStudent) {
+  if (currentRoles.includes("student")) {
     return <Navigate to="/dashboard/student-home" replace />;
   }
 
@@ -87,8 +90,8 @@ const DashboardHome = () => {
     return <Navigate to="/dashboard/grade-coordinator-home" replace />;
   }
 
-  // Redirect parents to their dedicated 'WOW' dashboard
-  if (profile.roles.includes("parent") && !isStaff) {
+  // Redirect parents to their dedicated dashboard
+  if (currentRoles.includes("parent") && !isStaff) {
     return <Navigate to="/dashboard/my-child" replace />;
   }
 
