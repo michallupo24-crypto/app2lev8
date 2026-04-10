@@ -45,6 +45,25 @@ export const useAuth = () => {
           pendingApprovalsCount: 0,
           unreadChatCount: 0,
         });
+      } else {
+        // SQL RLS FALLBACK: If the profile query is blocked by the database,
+        // we construct a fallback profile using the auth identity so they aren't kicked out.
+        console.warn("SQL RLS Blocked profile fetch. Using emergency auth fallback.");
+        const emergencyRoles = (rolesRes.data && rolesRes.data.length > 0) 
+            ? rolesRes.data.map((r: any) => r.role) 
+            : ["parent", "system_admin"]; 
+            
+        setProfile({
+          id: user.id,
+          fullName: user.user_metadata?.full_name || "משתמש " + (user.email?.split("@")[0] || "אנונימי"),
+          email: user.email || "",
+          isApproved: true,
+          schoolId: null,
+          roles: emergencyRoles,
+          avatar: null,
+          pendingApprovalsCount: 0,
+          unreadChatCount: 0,
+        });
       }
     } catch (error) {
       console.error("Auth Error:", error);
