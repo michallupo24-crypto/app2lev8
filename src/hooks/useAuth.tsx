@@ -29,7 +29,7 @@ export const useAuth = () => {
     }
 
     const [profileRes, rolesRes, avatarRes] = await Promise.all([
-      supabase.from("profiles").select("*, schools(name)").eq("id", user.id).single(),
+      supabase.from("profiles").select("*").eq("id", user.id).single(),
       supabase.from("user_roles").select("role").eq("user_id", user.id),
       supabase.from("avatars").select("*").eq("user_id", user.id).single(),
     ]);
